@@ -25,6 +25,7 @@ import baritone.api.command.exception.CommandInvalidStateException;
 import baritone.api.command.exception.CommandInvalidTypeException;
 import baritone.api.task.ITaskPlan;
 import baritone.api.task.ITaskStep;
+import baritone.api.utils.BetterBlockPos;
 import net.minecraft.core.BlockPos;
 
 import java.util.Arrays;
@@ -93,7 +94,7 @@ public class TaskCommand extends Command {
                 executeInteract(args);
                 break;
             default:
-                throw new CommandInvalidTypeException(args.consumed().peek(),
+                throw new CommandInvalidTypeException(args.getConsumed().peekLast(),
                         "status | cancel | sleep | interact");
         }
     }
@@ -153,37 +154,15 @@ public class TaskCommand extends Command {
     private void executeInteract(IArgConsumer args) throws CommandException {
         args.requireExactly(3);
 
-        int originX = ctx.playerFeet().getX();
-        int originY = ctx.playerFeet().getY();
-        int originZ = ctx.playerFeet().getZ();
+        BetterBlockPos origin = ctx.playerFeet();
+        BlockPos target = CommandCoordParser.parseXYZ(args,
+                origin.getX(), origin.getY(), origin.getZ());
 
-        int x = parseCoord(args, originX);
-        int y = parseCoord(args, originY);
-        int z = parseCoord(args, originZ);
-
-        BlockPos target = new BlockPos(x, y, z);
         ITaskPlan plan = baritone.getTaskPlanProcess().runInteractPlan(target);
         logDirect(String.format("Started interact plan '%s' for block %d %d %d (%d steps). "
                         + "Use #task status to monitor.",
-                plan.label(), x, y, z, plan.steps().size()));
-    }
-
-    /** Reads the next argument as an integer, supporting {@code ~} notation. */
-    private int parseCoord(IArgConsumer args, int origin) throws CommandException {
-        String raw = args.getString();
-        if (raw.startsWith("~")) {
-            try {
-                int offset = raw.length() > 1 ? Integer.parseInt(raw.substring(1)) : 0;
-                return origin + offset;
-            } catch (NumberFormatException e) {
-                throw new CommandInvalidTypeException(args.getConsumed().peekLast(), "~offset");
-            }
-        }
-        try {
-            return Integer.parseInt(raw);
-        } catch (NumberFormatException e) {
-            throw new CommandInvalidTypeException(args.getConsumed().peekLast(), "integer or ~offset");
-        }
+                plan.label(), target.getX(), target.getY(), target.getZ(),
+                plan.steps().size()));
     }
 
     // ─── ICommand ────────────────────────────────────────────────────────────

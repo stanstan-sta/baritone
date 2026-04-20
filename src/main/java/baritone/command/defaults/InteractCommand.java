@@ -21,7 +21,6 @@ import baritone.api.IBaritone;
 import baritone.api.command.Command;
 import baritone.api.command.argument.IArgConsumer;
 import baritone.api.command.exception.CommandException;
-import baritone.api.command.exception.CommandInvalidTypeException;
 import baritone.api.utils.BetterBlockPos;
 import net.minecraft.core.BlockPos;
 
@@ -64,38 +63,12 @@ public class InteractCommand extends Command {
         args.requireExactly(3);
 
         BetterBlockPos origin = ctx.playerFeet();
-
-        // Parse each coordinate, respecting ~ notation
-        double x = parseRelative(args, origin.getX());
-        double y = parseRelative(args, origin.getY());
-        double z = parseRelative(args, origin.getZ());
-
-        BlockPos target = new BlockPos((int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z));
+        BlockPos target = CommandCoordParser.parseXYZ(args,
+                origin.getX(), origin.getY(), origin.getZ());
 
         logDirect(String.format("Interacting with block at %s %s %s",
                 target.getX(), target.getY(), target.getZ()));
         baritone.getInteractBlockProcess().interactWithBlock(target);
-    }
-
-    /**
-     * Reads the next argument as either a plain integer or a {@code ~}-relative
-     * offset from {@code origin}.
-     */
-    private double parseRelative(IArgConsumer args, int origin) throws CommandException {
-        String raw = args.getString();
-        if (raw.startsWith("~")) {
-            try {
-                double offset = raw.length() > 1 ? Double.parseDouble(raw.substring(1)) : 0;
-                return origin + offset;
-            } catch (NumberFormatException e) {
-                throw new CommandInvalidTypeException(args.getConsumed().peekLast(), "~offset");
-            }
-        }
-        try {
-            return Double.parseDouble(raw);
-        } catch (NumberFormatException e) {
-            throw new CommandInvalidTypeException(args.getConsumed().peekLast(), "number or ~offset");
-        }
     }
 
     @Override

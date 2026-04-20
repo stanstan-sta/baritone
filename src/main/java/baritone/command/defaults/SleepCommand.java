@@ -21,7 +21,7 @@ import baritone.api.IBaritone;
 import baritone.api.command.Command;
 import baritone.api.command.argument.IArgConsumer;
 import baritone.api.command.exception.CommandException;
-import baritone.api.command.exception.CommandInvalidTypeException;
+import baritone.api.utils.BetterBlockPos;
 import net.minecraft.core.BlockPos;
 
 import java.util.Arrays;
@@ -65,34 +65,16 @@ public class SleepCommand extends Command {
         if (args.hasAny()) {
             // Specific bed coordinates supplied
             args.requireExactly(3);
-            int x = parseCoord(args, ctx.playerFeet().getX());
-            int y = parseCoord(args, ctx.playerFeet().getY());
-            int z = parseCoord(args, ctx.playerFeet().getZ());
-            BlockPos bedPos = new BlockPos(x, y, z);
-            logDirect(String.format("Sleeping in bed at %d %d %d", x, y, z));
+            BetterBlockPos origin = ctx.playerFeet();
+            BlockPos bedPos = CommandCoordParser.parseXYZ(args,
+                    origin.getX(), origin.getY(), origin.getZ());
+            logDirect(String.format("Sleeping in bed at %d %d %d",
+                    bedPos.getX(), bedPos.getY(), bedPos.getZ()));
             baritone.getSleepInBedProcess().sleepInBed(bedPos);
         } else {
             // Auto-scan for nearest bed
             logDirect("Scanning for nearest bed to sleep in…");
             baritone.getSleepInBedProcess().sleepInBed();
-        }
-    }
-
-    /** Reads the next argument as an integer, supporting {@code ~} notation. */
-    private int parseCoord(IArgConsumer args, int origin) throws CommandException {
-        String raw = args.getString();
-        if (raw.startsWith("~")) {
-            try {
-                int offset = raw.length() > 1 ? Integer.parseInt(raw.substring(1)) : 0;
-                return origin + offset;
-            } catch (NumberFormatException e) {
-                throw new CommandInvalidTypeException(args.getConsumed().peekLast(), "~offset");
-            }
-        }
-        try {
-            return Integer.parseInt(raw);
-        } catch (NumberFormatException e) {
-            throw new CommandInvalidTypeException(args.getConsumed().peekLast(), "integer or ~offset");
         }
     }
 

@@ -77,10 +77,24 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
     private static final String STEP_BED_VERIFY = "Verify sleep";
 
     // ── Timeouts / retry limits ──────────────────────────────────────────────
+    /** Max path-calc failures before giving up with UNREACHABLE. */
     private static final int MAX_CALC_FAILURES  = 3;
+    /**
+     * Ticks of right-click attempts before declaring TIMEOUT (~2 seconds at 20 TPS).
+     * Enough time for a slow server to respond to the use packet.
+     */
     private static final int INTERACT_TIMEOUT   = 40;
+    /**
+     * Ticks to wait for {@code player.isSleeping()} confirmation (3 seconds).
+     * Covers high-latency servers where the sleep packet round-trip is slow.
+     */
     private static final int SLEEP_VERIFY_TICKS = 60;
+    /** Radius (blocks) for the bed world scan — matches SleepInBedProcess. */
     private static final int BED_SCAN_RADIUS    = 64;
+    /**
+     * Overworld day-time tick at which sleep becomes allowed (just after dusk).
+     * Value 12542 is the vanilla threshold used by {@code BedBlock.canSetSpawn}.
+     */
     private static final long NIGHT_START_TICK  = 12542L;
 
     /** All 16 bed block variants. */
