@@ -80,6 +80,9 @@ public class Baritone implements IBaritone {
     private final FarmProcess farmProcess;
     private final InventoryPauserProcess inventoryPauserProcess;
     private final IElytraProcess elytraProcess;
+    private final InteractBlockProcess interactBlockProcess;
+    private final SleepInBedProcess sleepInBedProcess;
+    private final TaskPlanProcess taskPlanProcess;
 
     private final PathingControlManager pathingControlManager;
     private final SelectionManager selectionManager;
@@ -124,6 +127,9 @@ public class Baritone implements IBaritone {
             this.inventoryPauserProcess  = this.registerProcess(InventoryPauserProcess::new);
             this.elytraProcess           = this.registerProcess(ElytraProcess::create);
             this.registerProcess(BackfillProcess::new);
+            this.interactBlockProcess    = this.registerProcess(InteractBlockProcess::new);
+            this.sleepInBedProcess       = this.registerProcess(SleepInBedProcess::new);
+            this.taskPlanProcess         = this.registerProcess(TaskPlanProcess::new);
         }
 
         this.worldProvider = new WorldProvider(this);
@@ -248,6 +254,21 @@ public class Baritone implements IBaritone {
                 mc.execute(() -> mc.setScreen(new GuiClick()));
             } catch (Exception ignored) {}
         }).start();
+    }
+
+    @Override
+    public InteractBlockProcess getInteractBlockProcess() {
+        return this.interactBlockProcess;
+    }
+
+    @Override
+    public SleepInBedProcess getSleepInBedProcess() {
+        return this.sleepInBedProcess;
+    }
+
+    @Override
+    public TaskPlanProcess getTaskPlanProcess() {
+        return this.taskPlanProcess;
     }
 
     public Path getDirectory() {

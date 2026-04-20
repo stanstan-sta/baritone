@@ -25,6 +25,7 @@ import baritone.api.event.listener.IEventBus;
 import baritone.api.pathing.calc.IPathingControlManager;
 import baritone.api.process.*;
 import baritone.api.selection.ISelectionManager;
+import net.minecraft.core.BlockPos;
 import baritone.api.utils.IInputOverrideHandler;
 import baritone.api.utils.IPlayerContext;
 
@@ -138,6 +139,24 @@ public interface IBaritone {
      * @see ICommandManager
      */
     ICommandManager getCommandManager();
+
+    /**
+     * @return The {@link IInteractBlockProcess} instance
+     * @see IInteractBlockProcess
+     */
+    IInteractBlockProcess getInteractBlockProcess();
+
+    /**
+     * @return The {@link ISleepInBedProcess} instance
+     * @see ISleepInBedProcess
+     */
+    ISleepInBedProcess getSleepInBedProcess();
+
+    /**
+     * @return The {@link ITaskPlanProcess} instance
+     * @see ITaskPlanProcess
+     */
+    ITaskPlanProcess getTaskPlanProcess();
 
     /**
      * Open click
