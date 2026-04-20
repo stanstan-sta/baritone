@@ -146,10 +146,25 @@ public final class InteractBlockProcess extends BaritoneProcessHelper
 
             // Actually looking at the block?
             if (ctx.isLookingAt(target)) {
+                // On the first tick we look at the block, issue the right-click.
+                // We give a 3-tick window to detect a container opening (chests,
+                // furnaces, etc.).  For non-container interactions (doors, buttons,
+                // beds, levers) we simply confirm success after the click was sent.
                 baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
-                // If a non-inventory screen opened, the interaction succeeded
+
+                // A non-inventory container opened → definitive success
                 if (!(ctx.player().containerMenu instanceof InventoryMenu)) {
                     logDirect("InteractBlock: interaction succeeded (container opened)");
+                    baritone.getInputOverrideHandler().clearAllKeys();
+                    finish(TaskOutcome.SUCCEEDED);
+                    return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+                }
+
+                // After a short window without a container, assume the click was
+                // delivered to a non-GUI block (door, button, bed, lever, …).
+                if (interactTick >= 4) {
+                    logDirect("InteractBlock: interaction sent (no container opened)");
+                    baritone.getInputOverrideHandler().clearAllKeys();
                     finish(TaskOutcome.SUCCEEDED);
                     return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
                 }

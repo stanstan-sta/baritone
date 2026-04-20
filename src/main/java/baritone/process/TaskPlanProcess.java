@@ -307,8 +307,16 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
 
         if (ctx.isLookingAt(targetPos)) {
             baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
+            // Container opened → definitive success
             if (!(ctx.player().containerMenu instanceof InventoryMenu)) {
-                logDirect("TaskPlan: block interaction succeeded");
+                logDirect("TaskPlan: block interaction succeeded (container opened)");
+                baritone.getInputOverrideHandler().clearAllKeys();
+                succeedStep();
+                return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+            }
+            // Short window without container: assume non-GUI block was clicked
+            if (interactTick >= 4) {
+                logDirect("TaskPlan: block interaction sent (no container opened)");
                 baritone.getInputOverrideHandler().clearAllKeys();
                 succeedStep();
                 return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);

@@ -37,7 +37,6 @@ public final class TaskPlanImpl implements ITaskPlan {
 
     private final String label;
     private final List<TaskStepImpl> mutableSteps;
-    private final List<ITaskStep> readOnlySteps;
 
     private volatile int currentStepIndex = -1;
     private volatile StepStatus status = StepStatus.PENDING;
@@ -46,9 +45,6 @@ public final class TaskPlanImpl implements ITaskPlan {
     public TaskPlanImpl(String label) {
         this.label = label;
         this.mutableSteps = new ArrayList<>();
-        this.readOnlySteps = Collections.unmodifiableList(
-                new ArrayList<>(mutableSteps) // updated below
-        );
     }
 
     // ─── Builder API (used by TaskPlanProcess factories) ─────────────────────
