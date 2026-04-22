@@ -20,13 +20,17 @@ package baritone.command.defaults;
 import baritone.api.IBaritone;
 import baritone.api.command.Command;
 import baritone.api.command.argument.IArgConsumer;
+import baritone.api.command.datatypes.ItemById;
 import baritone.api.command.exception.CommandException;
 import baritone.api.command.exception.CommandInvalidStateException;
 import baritone.api.command.exception.CommandInvalidTypeException;
+import baritone.api.task.ContainerAction;
 import baritone.api.task.ITaskPlan;
 import baritone.api.task.ITaskStep;
 import baritone.api.utils.BetterBlockPos;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.Item;
 
 import java.util.Arrays;
 import java.util.List;
@@ -93,9 +97,12 @@ public class TaskCommand extends Command {
             case "interact":
                 executeInteract(args);
                 break;
+            case "chest":
+                executeChest(args);
+                break;
             default:
                 throw new CommandInvalidTypeException(args.getConsumed().peekLast(),
-                        "status | cancel | sleep | interact");
+                        "status | cancel | sleep | interact | chest");
         }
     }
 
@@ -167,13 +174,63 @@ public class TaskCommand extends Command {
 
     // ─── ICommand ────────────────────────────────────────────────────────────
 
+    private void executeChest(IArgConsumer args) throws CommandException {
+        args.requireMin(5);
+        args.requireMax(6);
+
+        BetterBlockPos origin = ctx.playerFeet();
+        BlockPos target = CommandCoordParser.parseXYZ(args,
+                origin.getX(), origin.getY(), origin.getZ());
+
+        String mode = args.getString().toLowerCase();
+        Item item = args.getDatatypeFor(ItemById.INSTANCE);
+        int count = -1;
+        if (args.hasAny()) {
+            String countToken = args.peekString().toLowerCase();
+            if ("all".equals(countToken) || "max".equals(countToken)) {
+                args.getString();
+            } else {
+                count = args.getAs(Integer.class);
+            }
+        }
+        args.requireMax(0);
+
+        ContainerAction action;
+        switch (mode) {
+            case "withdraw":
+                action = ContainerAction.withdraw(item, count);
+                break;
+            case "deposit":
+                action = ContainerAction.deposit(item, count);
+                break;
+            default:
+                throw new CommandInvalidTypeException(args.consumed(),
+                        "withdraw | deposit");
+        }
+
+        ITaskPlan plan = baritone.getTaskPlanProcess().runContainerPlan(target, action);
+        logDirect(String.format("Started chest plan '%s' for block %d %d %d (%s %s%s). "
+                        + "Use #task status to monitor.",
+                plan.label(),
+                target.getX(), target.getY(), target.getZ(),
+                mode,
+                BuiltInRegistries.ITEM.getKey(item),
+                action.movesAllMatchingItems() ? "" : " x" + action.getCount()));
+    }
+
     @Override
     public Stream<String> tabComplete(String label, IArgConsumer args) {
         if (!args.hasAny()) return Stream.empty();
         if (!args.has(2)) {
             // First token: offer subcommands
-            return Stream.of("status", "cancel", "sleep", "interact")
-                    .filter(s -> s.startsWith(args.peekString().toLowerCase()));
+            String prefix;
+            try {
+                prefix = args.peekString().toLowerCase();
+            } catch (baritone.api.command.exception.CommandNotEnoughArgumentsException e) {
+                return Stream.empty();
+            }
+            return Stream.of("status", "cancel", "sleep", "interact", "chest")
+                    .filter(s -> s.startsWith(prefix));
         }
         // Second token onward: if subcommand is "interact" offer coordinate hints
         return Stream.empty();

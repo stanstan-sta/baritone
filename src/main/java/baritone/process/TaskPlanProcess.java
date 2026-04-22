@@ -24,6 +24,7 @@ import baritone.api.pathing.goals.GoalGetToBlock;
 import baritone.api.process.ITaskPlanProcess;
 import baritone.api.process.PathingCommand;
 import baritone.api.process.PathingCommandType;
+import baritone.api.task.ContainerAction;
 import baritone.api.task.ITaskPlan;
 import baritone.api.task.StepStatus;
 import baritone.api.task.TaskOutcome;
@@ -35,7 +36,16 @@ import baritone.task.TaskPlanImpl;
 import baritone.task.TaskStepImpl;
 import baritone.utils.BaritoneProcessHelper;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.InventoryMenu;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -76,6 +86,11 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
     private static final String STEP_BED_INTERACT = "Interact with bed";
     private static final String STEP_BED_VERIFY = "Verify sleep";
 
+    // ── Container-plan step tags ─────────────────────────────────────────────
+    private static final String STEP_AWAIT_CONTAINER = "Wait for container";
+    private static final String STEP_TRANSFER_ITEMS = "Transfer items";
+    private static final String STEP_CLOSE_CONTAINER = "Close container";
+
     // ── Timeouts / retry limits ──────────────────────────────────────────────
     /** Max path-calc failures before giving up with UNREACHABLE. */
     private static final int MAX_CALC_FAILURES  = 3;
@@ -115,9 +130,11 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
     // Shared per-step state (reused across plan types)
     private BlockPos targetPos;
     private List<BlockPos> bedCandidates;
+    private ContainerAction containerAction;
     private int interactTick;
     private int calcFailCount;
     private int verifyTick;
+    private int transferRemaining;
 
     public TaskPlanProcess(Baritone baritone) {
         super(baritone);
@@ -153,6 +170,22 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         p.addStep(STEP_PATH);
         p.addStep(STEP_INTERACT);
         this.targetPos = target;
+        runPlan(p);
+        return p;
+    }
+
+    @Override
+    public ITaskPlan runContainerPlan(BlockPos target, ContainerAction action) {
+        if (target == null) throw new IllegalArgumentException("target must not be null");
+        if (action == null) throw new IllegalArgumentException("action must not be null");
+        TaskPlanImpl p = new TaskPlanImpl("container_interact");
+        p.addStep(STEP_PATH);
+        p.addStep(STEP_INTERACT);
+        p.addStep(STEP_AWAIT_CONTAINER);
+        p.addStep(STEP_TRANSFER_ITEMS);
+        p.addStep(STEP_CLOSE_CONTAINER);
+        this.targetPos = target;
+        this.containerAction = action;
         runPlan(p);
         return p;
     }
@@ -254,6 +287,14 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
                 return tickPathToBlock(calcFailed);
             case STEP_INTERACT:
                 return tickInteractWithBlock();
+                
+            // ── Container plan ─────────────────────────────────────────────────
+            case STEP_AWAIT_CONTAINER:
+                return tickAwaitContainer();
+            case STEP_TRANSFER_ITEMS:
+                return tickTransferItems();
+            case STEP_CLOSE_CONTAINER:
+                return tickCloseContainer();
 
             // ── Sleep plan ────────────────────────────────────────────────────
             case STEP_SCAN:
@@ -311,7 +352,12 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
             failStep(TaskOutcome.UNREACHABLE);
             return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
         }
-        baritone.getLookBehavior().updateTarget(reachable.get(), true);
+
+        if (interactTick == 0 || interactTick % 4 == 0) {
+            sendUsePacket(targetPos);
+            ctx.player().swing(InteractionHand.MAIN_HAND);
+            logDirect("TaskPlan: sent seamless interaction packet to " + targetPos);
+        }
 
         if (interactTick++ >= INTERACT_TIMEOUT) {
             logDirect("TaskPlan: INTERACT_WITH_BLOCK timed out");
@@ -319,23 +365,103 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
             return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
         }
 
-        if (ctx.isLookingAt(targetPos)) {
-            baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_RIGHT, true);
-            // Container opened → definitive success
-            if (!(ctx.player().containerMenu instanceof InventoryMenu)) {
-                logDirect("TaskPlan: block interaction succeeded (container opened)");
-                baritone.getInputOverrideHandler().clearAllKeys();
-                succeedStep();
-                return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
-            }
-            // Short window without container: assume non-GUI block was clicked
-            if (interactTick >= 4) {
-                logDirect("TaskPlan: block interaction sent (no container opened)");
-                baritone.getInputOverrideHandler().clearAllKeys();
-                succeedStep();
-                return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
-            }
+        // A non-inventory container opened → definitive success
+        if (!(ctx.player().containerMenu instanceof InventoryMenu)) {
+            logDirect("TaskPlan: block interaction succeeded (container opened)");
+            baritone.getInputOverrideHandler().clearAllKeys();
+            succeedStep();
+            return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
         }
+
+        if (isContainerPlan()) {
+            return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+        }
+
+        // Wait a few ticks to ensure non-gui interactions register.
+        if (interactTick >= 4) {
+            logDirect("TaskPlan: block interaction sent to " + getBlockName(targetPos));
+            baritone.getInputOverrideHandler().clearAllKeys();
+            succeedStep();
+            return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+        }
+
+        return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+    }
+    
+    // ── Container-plan step handlers ─────────────────────────────────────────
+
+    private PathingCommand tickAwaitContainer() {
+        if (!(ctx.player().containerMenu instanceof InventoryMenu)) {
+            succeedStep();
+            return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+        }
+        if (interactTick++ >= INTERACT_TIMEOUT) {
+            logDirect("TaskPlan: AWAIT_CONTAINER timed out. Container did not open.");
+            failStep(TaskOutcome.TIMEOUT);
+            return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+        }
+        return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+    }
+
+    private PathingCommand tickTransferItems() {
+        AbstractContainerMenu menu = ctx.player().containerMenu;
+        if (menu instanceof InventoryMenu) {
+            failStep(TaskOutcome.INTERACTION_FAILED);
+            return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+        }
+        if (containerAction == null) {
+            succeedStep();
+            return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+        }
+
+        if (!menu.getCarried().isEmpty()) {
+            logDirect("TaskPlan: cursor is carrying an item; cannot continue transfer safely");
+            failStep(TaskOutcome.INTERACTION_FAILED);
+            return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+        }
+
+        int sourceSlot = findTransferSourceSlot(menu);
+        if (sourceSlot < 0) {
+            if (containerAction.movesAllMatchingItems()) {
+                logDirect("TaskPlan: transfer complete");
+                succeedStep();
+            } else {
+                logDirect("TaskPlan: not enough matching items to satisfy requested count");
+                failStep(TaskOutcome.NOT_FOUND);
+            }
+            return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+        }
+
+        ItemStack before = menu.getSlot(sourceSlot).getItem().copy();
+        ctx.playerController().windowClick(menu.containerId, sourceSlot, 0, ClickType.QUICK_MOVE, ctx.player());
+        ItemStack after = menu.getSlot(sourceSlot).getItem();
+        boolean moved = after.isEmpty()
+                || after.getItem() != before.getItem()
+                || after.getCount() != before.getCount();
+
+        if (!moved) {
+            logDirect("TaskPlan: transfer blocked; destination likely full");
+            failStep(TaskOutcome.INTERACTION_FAILED);
+            return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+        }
+
+        if (transferRemaining > 0) {
+            transferRemaining -= before.getCount();
+        }
+
+        logDirect("TaskPlan: moved " + before.getCount() + "x " + before.getItem() + " from slot " + sourceSlot);
+        if (transferRemaining <= 0 && !containerAction.movesAllMatchingItems()) {
+            succeedStep();
+        }
+        return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+    }
+
+    private PathingCommand tickCloseContainer() {
+        if (!(ctx.player().containerMenu instanceof InventoryMenu)) {
+            ctx.player().closeContainer();
+            logDirect("TaskPlan: Container closed.");
+        }
+        succeedStep();
         return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
     }
 
@@ -477,6 +603,9 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         interactTick = 0;
         calcFailCount = 0;
         verifyTick = 0;
+        transferRemaining = containerAction == null
+                ? 0
+                : (containerAction.movesAllMatchingItems() ? -1 : containerAction.getCount());
         plan.markRunning(idx);
         plan.mutableSteps().get(idx).setRunning();
         logDirect("TaskPlan[" + plan.label() + "]: starting step "
@@ -522,10 +651,12 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         plan = null;
         stepIdx = 0;
         targetPos = null;
+        containerAction = null;
         bedCandidates = null;
         interactTick = 0;
         calcFailCount = 0;
         verifyTick = 0;
+        transferRemaining = 0;
         baritone.getInputOverrideHandler().clearAllKeys();
     }
 
@@ -534,8 +665,8 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
     private List<BlockPos> findNearbyBeds() {
         List<BlockPos> result = new ArrayList<>();
         BetterBlockPos pf = ctx.playerFeet();
-        int minY = ctx.world().getMinBuildHeight();
-        int maxY = ctx.world().getMaxBuildHeight();
+        int minY = Math.max(ctx.world().getMinY(), pf.y - BED_SCAN_RADIUS);
+        int maxY = Math.min(ctx.world().getMaxY(), pf.y + BED_SCAN_RADIUS + 1);
         for (int x = pf.x - BED_SCAN_RADIUS; x <= pf.x + BED_SCAN_RADIUS; x++) {
             for (int z = pf.z - BED_SCAN_RADIUS; z <= pf.z + BED_SCAN_RADIUS; z++) {
                 for (int y = minY; y < maxY; y++) {
@@ -563,5 +694,110 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
                     .toArray(baritone.api.pathing.goals.Goal[]::new));
         }
         return new GoalGetToBlock(targetPos);
+    }
+
+    private boolean isContainerPlan() {
+        return plan != null && "container_interact".equals(plan.label());
+    }
+
+    private void sendUsePacket(BlockPos pos) {
+        Vec3 hitVec = Vec3.atCenterOf(pos);
+        Vec3 eyePos = ctx.player().getEyePosition();
+        Direction face = nearestInteractionFace(
+                eyePos.x - hitVec.x,
+                eyePos.y - hitVec.y,
+                eyePos.z - hitVec.z
+        );
+        BlockHitResult hitResult = new BlockHitResult(hitVec, face, pos, false);
+        ctx.playerController().processRightClickBlock(ctx.player(), ctx.world(), InteractionHand.MAIN_HAND, hitResult);
+    }
+
+    private int findTransferSourceSlot(AbstractContainerMenu menu) {
+        if (containerAction == null) {
+            return -1;
+        }
+        if (containerAction.getType() == ContainerAction.Type.DUMP_ALL) {
+            return findFirstMovablePlayerSlot(menu, null);
+        }
+        int playerInventoryStart = firstPlayerInventorySlot(menu);
+        switch (containerAction.getType()) {
+            case WITHDRAW:
+                return findBestMatchingSlot(menu, 0, playerInventoryStart, containerAction.getTargetItem());
+            case DEPOSIT:
+                return findBestMatchingSlot(menu, playerInventoryStart, menu.slots.size(), containerAction.getTargetItem());
+            default:
+                return -1;
+        }
+    }
+
+    private int findBestMatchingSlot(AbstractContainerMenu menu, int start, int end, net.minecraft.world.item.Item item) {
+        int bestBelowRemainingSlot = -1;
+        int bestBelowRemainingCount = -1;
+        int bestOverflowSlot = -1;
+        int bestOverflowCount = Integer.MAX_VALUE;
+        for (int i = start; i < end; i++) {
+            Slot slot = menu.getSlot(i);
+            if (!slot.hasItem() || slot.getItem().getItem() != item) {
+                continue;
+            }
+            int count = slot.getItem().getCount();
+            if (transferRemaining > 0) {
+                if (count == transferRemaining) {
+                    return i;
+                }
+                if (count > transferRemaining && count < bestOverflowCount) {
+                    bestOverflowCount = count;
+                    bestOverflowSlot = i;
+                } else if (count < transferRemaining && count > bestBelowRemainingCount) {
+                    bestBelowRemainingCount = count;
+                    bestBelowRemainingSlot = i;
+                }
+            } else {
+                return i;
+            }
+        }
+        if (transferRemaining > 0) {
+            if (bestOverflowSlot >= 0) {
+                return bestOverflowSlot;
+            }
+            return bestBelowRemainingSlot;
+        }
+        return -1;
+    }
+
+    private String getBlockName(BlockPos pos) {
+        BlockState state = ctx.world().getBlockState(pos);
+        return BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+    }
+
+    private int findFirstMovablePlayerSlot(AbstractContainerMenu menu, net.minecraft.world.item.Item item) {
+        int playerInventoryStart = firstPlayerInventorySlot(menu);
+        for (int i = playerInventoryStart; i < menu.slots.size(); i++) {
+            Slot slot = menu.getSlot(i);
+            if (!slot.hasItem()) {
+                continue;
+            }
+            if (item == null || slot.getItem().getItem() == item) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private int firstPlayerInventorySlot(AbstractContainerMenu menu) {
+        return Math.max(0, menu.slots.size() - 36);
+    }
+
+    private Direction nearestInteractionFace(double dx, double dy, double dz) {
+        double absX = Math.abs(dx);
+        double absY = Math.abs(dy);
+        double absZ = Math.abs(dz);
+        if (absY >= absX && absY >= absZ) {
+            return dy >= 0 ? Direction.UP : Direction.DOWN;
+        }
+        if (absX >= absZ) {
+            return dx >= 0 ? Direction.EAST : Direction.WEST;
+        }
+        return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
     }
 }

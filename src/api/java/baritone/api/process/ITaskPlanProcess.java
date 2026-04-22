@@ -19,6 +19,7 @@ package baritone.api.process;
 
 import baritone.api.task.ITaskPlan;
 import baritone.api.task.TaskOutcome;
+import baritone.api.task.ContainerAction;
 import net.minecraft.core.BlockPos;
 
 /**
@@ -67,6 +68,15 @@ public interface ITaskPlanProcess extends IBaritoneProcess {
      * @return the plan that was queued; never {@code null}
      */
     ITaskPlan runInteractPlan(BlockPos target);
+
+    /**
+     * Convenience factory: build and immediately run a container manipulation plan.
+     *
+     * @param target the container to interact with; must not be {@code null}
+     * @param action the action to perform on the container; must not be {@code null}
+     * @return the plan that was queued; never {@code null}
+     */
+    ITaskPlan runContainerPlan(BlockPos target, ContainerAction action);
 
     /**
      * Returns the plan that is currently executing, or {@code null} if this

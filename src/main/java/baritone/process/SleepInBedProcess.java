@@ -44,17 +44,19 @@ import java.util.Optional;
 /**
  * Finds an accessible bed, navigates to it, and initiates sleep.
  *
- * <p>Internal state machine:
+ * <p>
+ * Internal state machine:
  * <ol>
- *   <li>{@code SCANNING} – searching loaded chunks for bed blocks.</li>
- *   <li>{@code PATHING} – moving toward the closest found bed.</li>
- *   <li>{@code INTERACTING} – in range; issuing right-click until sleeping or
- *       timeout.</li>
- *   <li>{@code DONE} – terminal state; {@link #lastOutcome()} is populated.</li>
+ * <li>{@code SCANNING} – searching loaded chunks for bed blocks.</li>
+ * <li>{@code PATHING} – moving toward the closest found bed.</li>
+ * <li>{@code INTERACTING} – in range; issuing right-click until sleeping or
+ * timeout.</li>
+ * <li>{@code DONE} – terminal state; {@link #lastOutcome()} is populated.</li>
  * </ol>
  *
  * <h3>Night-time detection</h3>
- * Sleep is only allowed between day-time ticks 12542 and 23458 in the overworld.
+ * Sleep is only allowed between day-time ticks 12542 and 23458 in the
+ * overworld.
  * The process checks this condition both at start and just before the
  * interaction attempt.
  */
@@ -83,18 +85,19 @@ public final class SleepInBedProcess extends BaritoneProcessHelper
             Blocks.PINK_BED, Blocks.GRAY_BED, Blocks.LIGHT_GRAY_BED,
             Blocks.CYAN_BED, Blocks.PURPLE_BED, Blocks.BLUE_BED,
             Blocks.BROWN_BED, Blocks.GREEN_BED, Blocks.RED_BED,
-            Blocks.BLACK_BED
-    );
+            Blocks.BLACK_BED);
 
-    private enum Phase { SCANNING, PATHING, INTERACTING, DONE }
+    private enum Phase {
+        SCANNING, PATHING, INTERACTING, DONE
+    }
 
     private Phase phase;
-    private BlockPos targetBed;         // specific bed we are heading to
-    private List<BlockPos> candidates;  // all found beds (may be refined)
+    private BlockPos targetBed; // specific bed we are heading to
+    private List<BlockPos> candidates; // all found beds (may be refined)
     private TaskOutcome outcome;
     private int interactTick;
     private int calcFailCount;
-    private boolean specificTarget;     // true when caller supplied a position
+    private boolean specificTarget; // true when caller supplied a position
 
     public SleepInBedProcess(Baritone baritone) {
         super(baritone);
@@ -171,8 +174,10 @@ public final class SleepInBedProcess extends BaritoneProcessHelper
 
     @Override
     public String displayName0() {
-        if (phase == Phase.SCANNING) return "SleepInBed: scanning";
-        if (targetBed != null) return "SleepInBed → " + targetBed;
+        if (phase == Phase.SCANNING)
+            return "SleepInBed: scanning";
+        if (targetBed != null)
+            return "SleepInBed → " + targetBed;
         return "SleepInBed";
     }
 
@@ -310,8 +315,8 @@ public final class SleepInBedProcess extends BaritoneProcessHelper
     private List<BlockPos> findNearbyBeds() {
         List<BlockPos> result = new ArrayList<>();
         BetterBlockPos pf = ctx.playerFeet();
-        int minY = ctx.world().getMinBuildHeight();
-        int maxY = ctx.world().getMaxBuildHeight();
+        int minY = Math.max(ctx.world().getMinY(), pf.y - SCAN_RADIUS);
+        int maxY = Math.min(ctx.world().getMaxY(), pf.y + SCAN_RADIUS + 1);
 
         for (int x = pf.x - SCAN_RADIUS; x <= pf.x + SCAN_RADIUS; x++) {
             for (int z = pf.z - SCAN_RADIUS; z <= pf.z + SCAN_RADIUS; z++) {
