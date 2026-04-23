@@ -259,8 +259,14 @@ public final class SleepInBedProcess extends BaritoneProcessHelper
             }
             phase = Phase.INTERACTING;
             interactTick = 0;
-            baritone.getPathingBehavior().cancelEverything();
             logDirect("SleepInBed: reached bed, attempting interaction");
+            return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+        }
+
+        if (targetBed == null) {
+            logDirect("SleepInBed: no target bed available");
+            finish(TaskOutcome.NOT_FOUND);
+            return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
         }
 
         return new PathingCommand(buildGoal(), PathingCommandType.REVALIDATE_GOAL_AND_PATH);
@@ -352,6 +358,9 @@ public final class SleepInBedProcess extends BaritoneProcessHelper
      * If there are multiple candidates a {@link GoalComposite} is used.
      */
     private baritone.api.pathing.goals.Goal buildGoal() {
+        if (targetBed == null) {
+            return null;
+        }
         if (candidates != null && candidates.size() > 1) {
             return new GoalComposite(candidates.stream()
                     .map(GoalGetToBlock::new)

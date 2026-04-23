@@ -127,6 +127,12 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
     private TaskPlanImpl plan;
     private int stepIdx;
 
+    private static final int TRANSFER_PHASE_NONE = 0;
+    private static final int TRANSFER_PHASE_PULL_EXACT = 1;
+    private static final int TRANSFER_PHASE_PLACE_TEMP = 2;
+    private static final int TRANSFER_PHASE_RETURN_EXCESS = 3;
+    private static final int TRANSFER_PHASE_DEPOSIT_REMAINING = 4;
+
     // Shared per-step state (reused across plan types)
     private BlockPos targetPos;
     private List<BlockPos> bedCandidates;
@@ -135,6 +141,11 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
     private int calcFailCount;
     private int verifyTick;
     private int transferRemaining;
+    private int transferPhase;
+    private int transferSourceSlot;
+    private int transferTempSlot;
+    private int transferGrabbed;
+    private int transferToReturn;
 
     public TaskPlanProcess(Baritone baritone) {
         super(baritone);
@@ -432,6 +443,62 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
             return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
         }
 
+        int currentCount = menu.getSlot(sourceSlot).getItem().getCount();
+        if (transferRemaining > 0 && currentCount > transferRemaining) {
+            int emptySlot = findFirstEmptyOppositeSlot(menu);
+            if (emptySlot < 0) {
+                logDirect("TaskPlan: no empty slot available for exact transfer");
+                failStep(TaskOutcome.INTERACTION_FAILED);
+                return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+            }
+            transferPhase = TRANSFER_PHASE_PLACE_TEMP;
+            transferSourceSlot = sourceSlot;
+            transferTempSlot = emptySlot;
+            transferGrabbed = currentCount;
+            transferToReturn = currentCount - transferRemaining;
+            ctx.playerController().windowClick(menu.containerId, sourceSlot, 0, ClickType.PICKUP, ctx.player());
+            return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+        }
+
+        if (transferPhase == TRANSFER_PHASE_PLACE_TEMP) {
+            if (menu.getCarried().isEmpty()) {
+                return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+            }
+            ctx.playerController().windowClick(menu.containerId, transferTempSlot, 0, ClickType.PICKUP, ctx.player());
+            transferPhase = TRANSFER_PHASE_RETURN_EXCESS;
+            return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+        }
+
+        if (transferPhase == TRANSFER_PHASE_RETURN_EXCESS) {
+            if (menu.getCarried().isEmpty()) {
+                ctx.playerController().windowClick(menu.containerId, transferTempSlot, 0, ClickType.PICKUP, ctx.player());
+                return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+            }
+            if (transferToReturn > 0) {
+                ctx.playerController().windowClick(menu.containerId, transferSourceSlot, 1, ClickType.PICKUP, ctx.player());
+                transferToReturn--;
+                return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+            }
+            ctx.playerController().windowClick(menu.containerId, transferTempSlot, 0, ClickType.PICKUP, ctx.player());
+            transferPhase = TRANSFER_PHASE_DEPOSIT_REMAINING;
+            return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+        }
+
+        if (transferPhase == TRANSFER_PHASE_DEPOSIT_REMAINING) {
+            if (!menu.getCarried().isEmpty()) {
+                return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+            }
+            transferPhase = TRANSFER_PHASE_NONE;
+            transferSourceSlot = -1;
+            transferTempSlot = -1;
+            transferGrabbed = 0;
+            transferToReturn = 0;
+            transferRemaining = 0;
+            logDirect("TaskPlan: transfer complete with exact count");
+            succeedStep();
+            return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
+        }
+
         ItemStack before = menu.getSlot(sourceSlot).getItem().copy();
         ctx.playerController().windowClick(menu.containerId, sourceSlot, 0, ClickType.QUICK_MOVE, ctx.player());
         ItemStack after = menu.getSlot(sourceSlot).getItem();
@@ -606,6 +673,11 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         transferRemaining = containerAction == null
                 ? 0
                 : (containerAction.movesAllMatchingItems() ? -1 : containerAction.getCount());
+        transferPhase = TRANSFER_PHASE_NONE;
+        transferSourceSlot = -1;
+        transferTempSlot = -1;
+        transferGrabbed = 0;
+        transferToReturn = 0;
         plan.markRunning(idx);
         plan.mutableSteps().get(idx).setRunning();
         logDirect("TaskPlan[" + plan.label() + "]: starting step "
@@ -657,6 +729,11 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         calcFailCount = 0;
         verifyTick = 0;
         transferRemaining = 0;
+        transferPhase = TRANSFER_PHASE_NONE;
+        transferSourceSlot = -1;
+        transferTempSlot = -1;
+        transferGrabbed = 0;
+        transferToReturn = 0;
         baritone.getInputOverrideHandler().clearAllKeys();
     }
 
@@ -778,6 +855,29 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
                 continue;
             }
             if (item == null || slot.getItem().getItem() == item) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private int findFirstEmptyOppositeSlot(AbstractContainerMenu menu) {
+        if (containerAction == null) {
+            return -1;
+        }
+        int playerInventoryStart = firstPlayerInventorySlot(menu);
+        if (containerAction.getType() == ContainerAction.Type.WITHDRAW) {
+            // Temporarily use an empty player inventory slot when withdrawing from container.
+            for (int i = playerInventoryStart; i < menu.slots.size(); i++) {
+                if (!menu.getSlot(i).hasItem()) {
+                    return i;
+                }
+            }
+            return -1;
+        }
+        // When depositing, use an empty container slot.
+        for (int i = 0; i < playerInventoryStart; i++) {
+            if (!menu.getSlot(i).hasItem()) {
                 return i;
             }
         }

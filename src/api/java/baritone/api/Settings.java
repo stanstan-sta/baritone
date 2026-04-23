@@ -778,7 +778,12 @@ public final class Settings {
     public final Setting<Boolean> elytraSmoothLook = new Setting<>(false);
 
     /**
-     * The number of ticks to average across for {@link #smoothLook};
+     * Smooth the client's camera during regular path execution to reduce harsh yaw changes.
+     */
+    public final Setting<Boolean> pathingSmoothLook = new Setting<>(true);
+
+    /**
+     * The number of ticks to average across for {@link #smoothLook} and {@link #pathingSmoothLook};
      */
     public final Setting<Integer> smoothLookTicks = new Setting<>(5);
 

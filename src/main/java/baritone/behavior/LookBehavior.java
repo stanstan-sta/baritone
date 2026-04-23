@@ -55,12 +55,16 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
 
     private final Deque<Float> smoothYawBuffer;
     private final Deque<Float> smoothPitchBuffer;
+    private final Deque<Float> serverSmoothYawBuffer;
+    private final Deque<Float> serverSmoothPitchBuffer;
 
     public LookBehavior(Baritone baritone) {
         super(baritone);
         this.processor = new AimProcessor(baritone.getPlayerContext());
         this.smoothYawBuffer = new ArrayDeque<>();
         this.smoothPitchBuffer = new ArrayDeque<>();
+        this.serverSmoothYawBuffer = new ArrayDeque<>();
+        this.serverSmoothPitchBuffer = new ArrayDeque<>();
     }
 
     @Override
@@ -114,7 +118,8 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
                     if (this.target.mode == Target.Mode.SERVER) {
                         ctx.player().setYRot(this.prevRotation.getYaw());
                         ctx.player().setXRot(this.prevRotation.getPitch());
-                    } else if (ctx.player().isFallFlying() ? Baritone.settings().elytraSmoothLook.value : Baritone.settings().smoothLook.value) {
+                    } else if (ctx.player().isFallFlying() ? Baritone.settings().elytraSmoothLook.value : Baritone.settings().smoothLook.value
+                            || Baritone.settings().pathingSmoothLook.value) {
                         ctx.player().setYRot((float) this.smoothYawBuffer.stream().mapToDouble(d -> d).average().orElse(this.prevRotation.getYaw()));
                         if (ctx.player().isFallFlying()) {
                             ctx.player().setXRot((float) this.smoothPitchBuffer.stream().mapToDouble(d -> d).average().orElse(this.prevRotation.getPitch()));
@@ -149,6 +154,8 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
     public void onWorldEvent(WorldEvent event) {
         this.serverRotation = null;
         this.target = null;
+        this.serverSmoothYawBuffer.clear();
+        this.serverSmoothPitchBuffer.clear();
     }
 
     public void pig() {
@@ -170,8 +177,21 @@ public final class LookBehavior extends Behavior implements ILookBehavior {
     public void onPlayerRotationMove(RotationMoveEvent event) {
         if (this.target != null) {
             final Rotation actual = this.processor.peekRotation(this.target.rotation);
-            event.setYaw(actual.getYaw());
-            event.setPitch(actual.getPitch());
+            if (Baritone.settings().pathingSmoothLook.value) {
+                this.serverSmoothYawBuffer.addLast(actual.getYaw());
+                while (this.serverSmoothYawBuffer.size() > Baritone.settings().smoothLookTicks.value) {
+                    this.serverSmoothYawBuffer.removeFirst();
+                }
+                this.serverSmoothPitchBuffer.addLast(actual.getPitch());
+                while (this.serverSmoothPitchBuffer.size() > Baritone.settings().smoothLookTicks.value) {
+                    this.serverSmoothPitchBuffer.removeFirst();
+                }
+                event.setYaw((float) this.serverSmoothYawBuffer.stream().mapToDouble(d -> d).average().orElse(actual.getYaw()));
+                event.setPitch((float) this.serverSmoothPitchBuffer.stream().mapToDouble(d -> d).average().orElse(actual.getPitch()));
+            } else {
+                event.setYaw(actual.getYaw());
+                event.setPitch(actual.getPitch());
+            }
         }
     }
 
