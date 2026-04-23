@@ -166,7 +166,7 @@ public class TaskCommand extends Command {
                 origin.getX(), origin.getY(), origin.getZ());
 
         ITaskPlan plan = baritone.getTaskPlanProcess().runInteractPlan(target);
-        logDirect(String.format("Started interact plan '%s' for block %d %d %d (%d steps). "d
+        logDirect(String.format("Started interact plan '%s' for block %d %d %d (%d steps). "
                         + "Use #task status to monitor.",
                 plan.label(), target.getX(), target.getY(), target.getZ(),
                 plan.steps().size()));

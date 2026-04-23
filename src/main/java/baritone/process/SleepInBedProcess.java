@@ -235,7 +235,7 @@ public final class SleepInBedProcess extends BaritoneProcessHelper
 
         // Check if we are now in interaction range
         Optional<Rotation> reachable = RotationUtils.reachable(ctx, targetBed,
-                ctx.playerController().getBlockReachDistance());
+                getInteractionReachDistance());
         if (reachable.isPresent()) {
             // Check occupied state before attempting to sleep
             BlockState state = ctx.world().getBlockState(targetBed);
@@ -281,7 +281,7 @@ public final class SleepInBedProcess extends BaritoneProcessHelper
         }
 
         Optional<Rotation> reachable = RotationUtils.reachable(ctx, targetBed,
-                ctx.playerController().getBlockReachDistance());
+                getInteractionReachDistance());
         if (!reachable.isPresent()) {
             // Moved out of range – fall back to pathing
             phase = Phase.PATHING;
@@ -367,6 +367,10 @@ public final class SleepInBedProcess extends BaritoneProcessHelper
                     .toArray(baritone.api.pathing.goals.Goal[]::new));
         }
         return new GoalGetToBlock(targetBed);
+    }
+
+    private double getInteractionReachDistance() {
+        return Math.max(0.0, ctx.playerController().getBlockReachDistance() - 0.1);
     }
 
     // ─── internal helpers ─────────────────────────────────────────────────────

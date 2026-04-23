@@ -340,7 +340,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
             }
         }
         Optional<Rotation> reachable = RotationUtils.reachable(ctx, targetPos,
-                ctx.playerController().getBlockReachDistance());
+                getInteractionReachDistance());
         if (reachable.isPresent()) {
             logDirect("TaskPlan: in range of " + targetPos);
             succeedStep();
@@ -356,7 +356,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
             return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
         }
         Optional<Rotation> reachable = RotationUtils.reachable(ctx, targetPos,
-                ctx.playerController().getBlockReachDistance());
+                getInteractionReachDistance());
         if (!reachable.isPresent()) {
             // Fell out of range – re-path
             logDirect("TaskPlan: drifted out of range during INTERACT, re-pathing");
@@ -582,7 +582,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         }
 
         Optional<Rotation> reachable = RotationUtils.reachable(ctx, targetPos,
-                ctx.playerController().getBlockReachDistance());
+                getInteractionReachDistance());
         if (reachable.isPresent()) {
             // Check occupied before transitioning to interact
             BlockState state = ctx.world().getBlockState(targetPos);
@@ -622,7 +622,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
             return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
         }
         Optional<Rotation> reachable = RotationUtils.reachable(ctx, targetPos,
-                ctx.playerController().getBlockReachDistance());
+                getInteractionReachDistance());
         if (!reachable.isPresent()) {
             logDirect("TaskPlan: drifted away from bed during interaction");
             failStep(TaskOutcome.UNREACHABLE);
@@ -771,6 +771,10 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
                     .toArray(baritone.api.pathing.goals.Goal[]::new));
         }
         return new GoalGetToBlock(targetPos);
+    }
+
+    private double getInteractionReachDistance() {
+        return Math.max(0.0, ctx.playerController().getBlockReachDistance() - 0.1);
     }
 
     private boolean isContainerPlan() {
