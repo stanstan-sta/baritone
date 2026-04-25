@@ -17,6 +17,7 @@
 
 package baritone.cache;
 
+import baritone.Baritone;
 import baritone.api.utils.BlockUtils;
 import baritone.utils.pathing.PathingBlockType;
 import com.google.common.collect.ImmutableSet;
@@ -31,8 +32,10 @@ import net.minecraft.world.level.dimension.DimensionType;
 
 import java.util.ArrayList;
 import java.util.BitSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * @author Brady
@@ -40,6 +43,24 @@ import java.util.Map;
  */
 public final class CachedChunk {
 
+    /**
+     * Cached set of blocks to track, populated on first access from settings.
+     * Avoids re-allocating a HashSet for every block in every chunk.
+     */
+    private static Set<Block> blocksToKeepTrackOf;
+
+    public static Set<Block> getBlocksToKeepTrackOf() {
+        if (blocksToKeepTrackOf == null) {
+            try {
+                blocksToKeepTrackOf = new HashSet<>(Baritone.settings().blocksToKeepTrackOf.value);
+            } catch (Exception e) {
+                blocksToKeepTrackOf = new HashSet<>();
+            }
+        }
+        return blocksToKeepTrackOf;
+    }
+
+    @Deprecated
     public static final ImmutableSet<Block> BLOCKS_TO_KEEP_TRACK_OF = ImmutableSet.of(
             Blocks.ENDER_CHEST,
             Blocks.FURNACE,

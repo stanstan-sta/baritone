@@ -91,7 +91,7 @@ public class FindCommand extends Command {
     public Stream<String> tabComplete(String label, IArgConsumer args) throws CommandException {
         return new TabCompleteHelper()
                 .append(
-                        CachedChunk.BLOCKS_TO_KEEP_TRACK_OF.stream()
+                        CachedChunk.getBlocksToKeepTrackOf().stream()
                                 .map(BuiltInRegistries.BLOCK::getKey)
                                 .map(Object::toString)
                 )
@@ -114,5 +114,60 @@ public class FindCommand extends Command {
                 "Usage:",
                 "> find <block> [...] - Try finding the listed blocks"
         );
+    }
+}
+            int adjY = y - chunk.getLevel().dimensionType().minY();
+            if (
+                    (x != 15 && MovementHelper.possiblyFlowing(getFromChunk(chunk, x + 1, adjY, z)))
+                            || (x != 0 && MovementHelper.possiblyFlowing(getFromChunk(chunk, x - 1, adjY, z)))
+                            || (z != 15 && MovementHelper.possiblyFlowing(getFromChunk(chunk, x, adjY, z + 1)))
+                            || (z != 0 && MovementHelper.possiblyFlowing(getFromChunk(chunk, x, adjY, z - 1)))
+            ) {
+                return PathingBlockType.AVOID;
+            }
+            if (x == 0 || x == 15 || z == 0 || z == 15) {
+                Vec3 flow = state.getFluidState().getFlow(chunk.getLevel(), new BlockPos(x + (chunk.getPos().x << 4), y, z + (chunk.getPos().z << 4)));
+                if (flow.x != 0.0 || flow.z != 0.0) {
+                    return PathingBlockType.WATER;
+                }
+                return PathingBlockType.AVOID;
+            }
+            return PathingBlockType.WATER;
+        }
+
+        if (MovementHelper.avoidWalkingInto(state) || MovementHelper.isBottomSlab(state)) {
+            return PathingBlockType.AVOID;
+        }
+        // We used to do an AABB check here
+        // however, this failed in the nether when you were near a nether fortress
+        // because fences check their adjacent blocks in the world for their fence connection status to determine AABB shape
+        // this caused a nullpointerexception when we saved chunks on unload, because they were unable to check their neighbors
+        if (block instanceof AirBlock || block instanceof TallGrassBlock || block instanceof DoublePlantBlock || block instanceof FlowerBlock) {
+            return PathingBlockType.AIR;
+        }
+
+        return PathingBlockType.SOLID;
+    }
+
+    public static BlockState pathingTypeToBlock(PathingBlockType type, DimensionType dimension, ResourceKey<Level> dimensionId) {
+        switch (type) {
+            case AIR:
+                return Blocks.AIR.defaultBlockState();
+            case WATER:
+                return Blocks.WATER.defaultBlockState();
+            case AVOID:
+                return Blocks.LAVA.defaultBlockState();
+            case SOLID:
+                // Dimension solid types
+                if (dimensionId == Level.NETHER) {
+                    return Blocks.NETHERRACK.defaultBlockState();
+                } else if (dimensionId == Level.END) {
+                    return Blocks.END_STONE.defaultBlockState();
+                } else { // overworld, or some custom dimension
+                    return Blocks.STONE.defaultBlockState();
+                }
+            default:
+                return null;
+        }
     }
 }
