@@ -22,6 +22,8 @@ import baritone.api.task.TaskOutcome;
 import baritone.api.task.ContainerAction;
 import net.minecraft.core.BlockPos;
 
+import java.util.List;
+
 /**
  * Executes multi-step {@link ITaskPlan}s, enabling LLM agents to orchestrate
  * compound actions (e.g. scan → path → interact → verify) with explicit,
@@ -91,4 +93,47 @@ public interface ITaskPlanProcess extends IBaritoneProcess {
      * <p>No-op if no plan is running.
      */
     void cancelPlan();
+
+    // ─── Queue API ─────────────────────────────────────────────────────────
+
+    /**
+     * Append a plan to the FIFO queue. If no plan is currently executing,
+     * the plan begins immediately; otherwise it waits until all
+     * previously queued plans complete.
+     *
+     * <p>Unlike {@link #runPlan(ITaskPlan)}, this does <b>not</b> cancel
+     * the currently running plan.
+     *
+     * @param plan the plan to queue; must not be {@code null}
+     */
+    void enqueuePlan(ITaskPlan plan);
+
+    /**
+     * Append every plan in the list to the queue in order.
+     * Semantics are identical to calling {@link #enqueuePlan(ITaskPlan)}
+     * for each element.
+     *
+     * @param plans the plans to queue; must not be {@code null}
+     */
+    void enqueuePlans(List<ITaskPlan> plans);
+
+    /**
+     * Remove all pending (not-yet-started) plans from the queue.
+     * The currently executing plan, if any, is <b>not</b> cancelled.
+     */
+    void clearQueue();
+
+    /**
+     * Number of plans waiting in the queue (excludes the running plan).
+     *
+     * @return non-negative count
+     */
+    int queueSize();
+
+    /**
+     * Total number of plans including the currently executing plan.
+     *
+     * @return {@code queueSize() + (isActive() ? 1 : 0)}
+     */
+    int pendingCount();
 }

@@ -51,8 +51,10 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BedPart;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
 
@@ -124,6 +126,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
 
     // ── Runtime state ────────────────────────────────────────────────────────
 
+    private final Deque<TaskPlanImpl> planQueue = new ArrayDeque<>();
     private TaskPlanImpl plan;
     private int stepIdx;
 
@@ -157,7 +160,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
     @Override
     public void runPlan(ITaskPlan plan) {
         if (plan == null) throw new IllegalArgumentException("plan must not be null");
-        cancelPlan(); // cancel any existing plan
+        cancelPlan(); // cancel any existing plan and drain queue
         this.plan = (TaskPlanImpl) plan;
         this.stepIdx = 0;
         advanceToStep(0);
@@ -208,8 +211,55 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
 
     @Override
     public void cancelPlan() {
-        if (plan == null) return;
-        abortPlan(TaskOutcome.CANCELLED);
+        if (plan != null) {
+            abortPlan(TaskOutcome.CANCELLED);
+        }
+        planQueue.clear();
+        clearState();
+    }
+
+    // ─── Queue API ────────────────────────────────────────────────────────────
+
+    @Override
+    public void enqueuePlan(ITaskPlan p) {
+        if (p == null) throw new IllegalArgumentException("plan must not be null");
+        TaskPlanImpl impl = (TaskPlanImpl) p;
+        if (plan == null) {
+            // idle — start immediately
+            this.plan = impl;
+            this.stepIdx = 0;
+            advanceToStep(0);
+        } else {
+            planQueue.addLast(impl);
+            int pos = planQueue.size();
+            logDirect("TaskPlan: queued '" + impl.label() + "' (position " + pos + " in queue)");
+        }
+    }
+
+    @Override
+    public void enqueuePlans(List<ITaskPlan> plans) {
+        if (plans == null) throw new IllegalArgumentException("plans must not be null");
+        for (ITaskPlan p : plans) {
+            enqueuePlan(p);
+        }
+    }
+
+    @Override
+    public void clearQueue() {
+        if (planQueue.isEmpty()) return;
+        int removed = planQueue.size();
+        planQueue.clear();
+        logDirect("TaskPlan: cleared " + removed + " queued plan(s)");
+    }
+
+    @Override
+    public int queueSize() {
+        return planQueue.size();
+    }
+
+    @Override
+    public int pendingCount() {
+        return (plan != null && plan.status() == StepStatus.RUNNING ? 1 : 0) + planQueue.size();
     }
 
     // ─── IBaritoneProcess ─────────────────────────────────────────────────────
@@ -696,13 +746,30 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
     }
 
     private void finishPlan(TaskOutcome outcome) {
-        logDirect("TaskPlan[" + plan.label() + "]: finished – " + outcome);
+        String label = plan.label();
+        logDirect("TaskPlan[" + label + "]: finished – " + outcome);
         plan.markSucceeded();
         clearState();
+
+        logDirect("[Baritone] Task complete: " + label);
+
+        // Auto-advance: pop next plan from the queue if available
+        if (!planQueue.isEmpty()) {
+            TaskPlanImpl next = planQueue.pollFirst();
+            this.plan = next;
+            this.stepIdx = 0;
+            advanceToStep(0);
+            int remaining = planQueue.size();
+            logDirect("[Baritone] Starting next queued task: " + next.label()
+                    + " (" + remaining + " remaining in queue)");
+        } else {
+            logDirect("[Baritone] All queued tasks complete");
+        }
     }
 
     private void abortPlan(TaskOutcome reason) {
         if (plan == null) return;
+        String label = plan.label();
         // Fail the currently running step
         if (stepIdx < plan.mutableSteps().size()) {
             TaskStepImpl current = plan.mutableSteps().get(stepIdx);
@@ -715,28 +782,11 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
             plan.mutableSteps().get(i).cancel();
         }
         plan.markFailed(reason);
-        logDirect("TaskPlan[" + plan.label() + "]: aborted – " + reason);
+        logDirect("TaskPlan[" + label + "]: aborted – " + reason);
+        logDirect("[Baritone] Task failed: " + label + " - " + reason);
         clearState();
+        planQueue.clear(); // drain queue on failure — don't auto-skip
     }
-
-    private void clearState() {
-        plan = null;
-        stepIdx = 0;
-        targetPos = null;
-        containerAction = null;
-        bedCandidates = null;
-        interactTick = 0;
-        calcFailCount = 0;
-        verifyTick = 0;
-        transferRemaining = 0;
-        transferPhase = TRANSFER_PHASE_NONE;
-        transferSourceSlot = -1;
-        transferTempSlot = -1;
-        transferGrabbed = 0;
-        transferToReturn = 0;
-        baritone.getInputOverrideHandler().clearAllKeys();
-    }
-
     // ─── World helpers ────────────────────────────────────────────────────────
 
     private List<BlockPos> findNearbyBeds() {
