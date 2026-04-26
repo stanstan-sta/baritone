@@ -136,4 +136,15 @@ public interface ITaskPlanProcess extends IBaritoneProcess {
      * @return {@code queueSize() + (isActive() ? 1 : 0)}
      */
     int pendingCount();
+
+    /**
+     * Find the nearest cached position of the given block name and run an
+     * interact plan on it. If no cached position is found the plan is not
+     * started and {@code null} is returned.
+     *
+     * @param blockName the block registry name (e.g. {@code "minecraft:chest"})
+     * @param maxSearchRadius maximum region search radius from the player
+     * @return the plan that was queued, or {@code null} if no block was found
+     */
+    ITaskPlan runInteractPlanByBlockName(String blockName, int maxSearchRadius);
 }

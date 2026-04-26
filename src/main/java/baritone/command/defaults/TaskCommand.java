@@ -20,6 +20,7 @@ package baritone.command.defaults;
 import baritone.api.IBaritone;
 import baritone.api.command.Command;
 import baritone.api.command.argument.IArgConsumer;
+import baritone.api.command.datatypes.BlockById;
 import baritone.api.command.datatypes.ItemById;
 import baritone.api.command.exception.CommandException;
 import baritone.api.command.exception.CommandInvalidStateException;
@@ -159,8 +160,28 @@ public class TaskCommand extends Command {
     }
 
     private void executeInteract(IArgConsumer args) throws CommandException {
-        args.requireExactly(3);
+        args.requireMin(1);
 
+        // Block-name form: #task interact <block>
+        // (1 non-coordinate argument)
+        if (!args.has(3)) {
+            args.requireMax(1);
+            String blockArg = args.peekString();
+            net.minecraft.world.level.block.Block block = args.getDatatypeFor(BlockById.INSTANCE);
+            String registryName = BuiltInRegistries.BLOCK.getKey(block).toString();
+            ITaskPlan plan = baritone.getTaskPlanProcess().runInteractPlanByBlockName(registryName, 4);
+            if (plan == null) {
+                logDirect("Could not find any cached positions for " + blockArg);
+                return;
+            }
+            logDirect(String.format("Started interact plan '%s' for %s (%d steps). "
+                            + "Use #task status to monitor.",
+                    plan.label(), blockArg, plan.steps().size()));
+            return;
+        }
+
+        // Coordinate form: #task interact <x> <y> <z>
+        args.requireExactly(3);
         BetterBlockPos origin = ctx.playerFeet();
         BlockPos target = CommandCoordParser.parseXYZ(args,
                 origin.getX(), origin.getY(), origin.getZ());

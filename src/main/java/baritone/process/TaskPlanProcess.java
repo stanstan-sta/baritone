@@ -183,9 +183,39 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         TaskPlanImpl p = new TaskPlanImpl("interact_block");
         p.addStep(STEP_PATH);
         p.addStep(STEP_INTERACT);
-        this.targetPos = target;
         runPlan(p);
+        this.targetPos = target;
         return p;
+    }
+
+    @Override
+    public ITaskPlan runInteractPlanByBlockName(String blockName, int maxSearchRadius) {
+        if (blockName == null || blockName.isEmpty()) {
+            throw new IllegalArgumentException("blockName must not be null or empty");
+        }
+        var cachedWorld = baritone.getWorldProvider().getCurrentWorld().getCachedWorld();
+        if (cachedWorld == null) {
+            logDirect("TaskPlan[" + blockName + "]: no cached world available");
+            return null;
+        }
+        BetterBlockPos pf = ctx.playerFeet();
+        ArrayList<BlockPos> positions = cachedWorld.getLocationsOf(
+                blockName, Integer.MAX_VALUE, pf.x, pf.z, maxSearchRadius);
+
+        if (positions.isEmpty()) {
+            logDirect("TaskPlan[" + blockName + "]: no cached positions found within "
+                    + maxSearchRadius + " region(s)");
+            return null;
+        }
+
+        // pick the closest position to the player
+        positions.sort((a, b) -> Double.compare(pf.distSqr(a), pf.distSqr(b)));
+        BlockPos target = positions.get(0);
+
+        logDirect("TaskPlan[" + blockName + "]: found nearest at " + target.getX()
+                + " " + target.getY() + " " + target.getZ()
+                + " (distance " + Math.round(Math.sqrt(pf.distSqr(target))) + " blocks)");
+        return runInteractPlan(target);
     }
 
     @Override
@@ -198,9 +228,9 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         p.addStep(STEP_AWAIT_CONTAINER);
         p.addStep(STEP_TRANSFER_ITEMS);
         p.addStep(STEP_CLOSE_CONTAINER);
+        runPlan(p);
         this.targetPos = target;
         this.containerAction = action;
-        runPlan(p);
         return p;
     }
 
@@ -733,6 +763,23 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         logDirect("TaskPlan[" + plan.label() + "]: starting step "
                 + (idx + 1) + "/" + plan.mutableSteps().size()
                 + " – " + plan.mutableSteps().get(idx).description());
+    }
+
+    private void clearState() {
+        plan = null;
+        stepIdx = 0;
+        targetPos = null;
+        containerAction = null;
+        bedCandidates = null;
+        interactTick = 0;
+        calcFailCount = 0;
+        verifyTick = 0;
+        transferRemaining = 0;
+        transferPhase = TRANSFER_PHASE_NONE;
+        transferSourceSlot = -1;
+        transferTempSlot = -1;
+        transferGrabbed = 0;
+        transferToReturn = 0;
     }
 
     private void succeedStep() {

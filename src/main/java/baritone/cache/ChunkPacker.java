@@ -47,6 +47,7 @@ public final class ChunkPacker {
         //long start = System.nanoTime() / 1000000L;
 
         Map<String, List<BlockPos>> specialBlocks = new HashMap<>();
+        Set<String> blockTypesPresent = new HashSet<>();
         final int height = chunk.getLevel().dimensionType().height();
         BitSet bitSet = new BitSet(CachedChunk.size(height));
         try {
@@ -78,6 +79,10 @@ public final class ChunkPacker {
                             bitSet.set(index, bits[0]);
                             bitSet.set(index + 1, bits[1]);
                             Block block = state.getBlock();
+                            if (block != Blocks.AIR) {
+                                String name = BlockUtils.blockToString(block);
+                                blockTypesPresent.add(name);
+                            }
                             if (CachedChunk.getBlocksToKeepTrackOf().contains(block)) {
                                 String name = BlockUtils.blockToString(block);
                                 specialBlocks.computeIfAbsent(name, b -> new ArrayList<>()).add(new BlockPos(x, y+chunk.getMinY(), z));
@@ -109,7 +114,7 @@ public final class ChunkPacker {
             }
         }
         // @formatter:on
-        return new CachedChunk(chunk.getPos().x, chunk.getPos().z, height, bitSet, blocks, specialBlocks, System.currentTimeMillis());
+        return new CachedChunk(chunk.getPos().x, chunk.getPos().z, height, bitSet, blocks, specialBlocks, blockTypesPresent, System.currentTimeMillis());
     }
 
     private static PathingBlockType getPathingBlockType(BlockState state, LevelChunk chunk, int x, int y, int z) {

@@ -175,9 +175,16 @@ public final class CachedChunk {
 
     private final Map<String, List<BlockPos>> specialBlockLocations;
 
+    /**
+     * Set of all distinct block registry names that appear in this chunk
+     * (excluding air). Used by {@link CachedRegion} to build a fast
+     * block-&#064;gt;chunk index for {@code getLocationsOf()}.
+     */
+    private final Set<String> blockTypesPresent;
+
     public final long cacheTimestamp;
 
-    CachedChunk(int x, int z, int height, BitSet data, BlockState[] overview, Map<String, List<BlockPos>> specialBlockLocations, long cacheTimestamp) {
+    CachedChunk(int x, int z, int height, BitSet data, BlockState[] overview, Map<String, List<BlockPos>> specialBlockLocations, Set<String> blockTypesPresent, long cacheTimestamp) {
         this.size = size(height);
         this.sizeInBytes = sizeInBytes(size);
         validateSize(data);
@@ -189,6 +196,7 @@ public final class CachedChunk {
         this.overview = overview;
         this.heightMap = new int[256];
         this.specialBlockLocations = specialBlockLocations;
+        this.blockTypesPresent = blockTypesPresent;
         this.cacheTimestamp = cacheTimestamp;
         if (specialBlockLocations.isEmpty()) {
             this.special = null;
@@ -278,6 +286,13 @@ public final class CachedChunk {
 
     public final Map<String, List<BlockPos>> getRelativeBlocks() {
         return specialBlockLocations;
+    }
+
+    /**
+     * @return the set of all distinct block registry names present in this chunk (excluding air)
+     */
+    public final Set<String> getBlockTypesPresent() {
+        return blockTypesPresent;
     }
 
     public final ArrayList<BlockPos> getAbsoluteBlocks(String blockType) {

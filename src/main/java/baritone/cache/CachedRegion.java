@@ -44,9 +44,15 @@ public final class CachedRegion implements ICachedRegion {
     private static final byte CHUNK_PRESENT = 1;
 
     /**
-     * Magic value to detect invalid cache files, or incompatible cache files saved in an old version of Baritone
+     * V1 magic (original format). No blockTypesPresent index.
      */
     private static final int CACHED_REGION_MAGIC = 456022911;
+
+    /**
+     * V2 magic: adds per-chunk blockTypesPresent for fast {@code getLocationsOf()}.
+     * Loaded V1 files will be upgraded on next save.
+     */
+    private static final int CACHED_REGION_MAGIC_V2 = 456022912;
 
     /**
      * All of the chunks in this region: A 32x32 array of them.
@@ -71,6 +77,12 @@ public final class CachedRegion implements ICachedRegion {
      * Has this region been modified since its most recent load or save
      */
     private boolean hasUnsavedChanges;
+
+    /**
+     * Block name → BitSet of chunk positions (bit index = chunkX * 32 + chunkZ)
+     * that contain at least one of this block. Rebuilt on load, updated on pack.
+     */
+    private final Map<String, BitSet> blockChunkIndex = new HashMap<>();
 
     CachedRegion(int x, int z, DimensionType dimension, ResourceKey<Level> dimensionId) {
         this.x = x;
@@ -97,12 +109,16 @@ public final class CachedRegion implements ICachedRegion {
 
     public final ArrayList<BlockPos> getLocationsOf(String block) {
         ArrayList<BlockPos> res = new ArrayList<>();
-        for (int chunkX = 0; chunkX < 32; chunkX++) {
-            for (int chunkZ = 0; chunkZ < 32; chunkZ++) {
-                if (chunks[chunkX][chunkZ] == null) {
-                    continue;
-                }
-                ArrayList<BlockPos> locs = chunks[chunkX][chunkZ].getAbsoluteBlocks(block);
+        BitSet index = blockChunkIndex.get(block);
+        if (index == null || index.isEmpty()) {
+            return res; // no chunk in this region has this block
+        }
+        for (int i = index.nextSetBit(0); i >= 0; i = index.nextSetBit(i + 1)) {
+            int cx = i / 32;
+            int cz = i % 32;
+            CachedChunk chunk = this.chunks[cx][cz];
+            if (chunk != null) {
+                ArrayList<BlockPos> locs = chunk.getAbsoluteBlocks(block);
                 if (locs != null) {
                     res.addAll(locs);
                 }
@@ -112,6 +128,27 @@ public final class CachedRegion implements ICachedRegion {
     }
 
     public final synchronized void updateCachedChunk(int chunkX, int chunkZ, CachedChunk chunk) {
+        // Remove old chunk's block types from the index
+        CachedChunk old = this.chunks[chunkX][chunkZ];
+        if (old != null && old.getBlockTypesPresent() != null) {
+            int bit = chunkX * 32 + chunkZ;
+            for (String blockType : old.getBlockTypesPresent()) {
+                BitSet bs = blockChunkIndex.get(blockType);
+                if (bs != null) {
+                    bs.clear(bit);
+                    if (bs.isEmpty()) {
+                        blockChunkIndex.remove(blockType);
+                    }
+                }
+            }
+        }
+        // Add new chunk's block types to the index
+        if (chunk != null && chunk.getBlockTypesPresent() != null) {
+            int bit = chunkX * 32 + chunkZ;
+            for (String blockType : chunk.getBlockTypesPresent()) {
+                blockChunkIndex.computeIfAbsent(blockType, k -> new BitSet(1024)).set(bit);
+            }
+        }
         this.chunks[chunkX][chunkZ] = chunk;
         hasUnsavedChanges = true;
     }
@@ -138,7 +175,7 @@ public final class CachedRegion implements ICachedRegion {
                     GZIPOutputStream gzipOut = new GZIPOutputStream(fileOut, 16384);
                     DataOutputStream out = new DataOutputStream(gzipOut)
             ) {
-                out.writeInt(CACHED_REGION_MAGIC);
+                out.writeInt(CACHED_REGION_MAGIC_V2);
                 for (int x = 0; x < 32; x++) {
                     for (int z = 0; z < 32; z++) {
                         CachedChunk chunk = this.chunks[x][z];
@@ -172,7 +209,7 @@ public final class CachedRegion implements ICachedRegion {
                                 out.writeShort(entry.getValue().size());
                                 for (BlockPos pos : entry.getValue()) {
                                     out.writeByte((byte) (pos.getZ() << 4 | pos.getX()));
-                                    out.writeInt(pos.getY()-dimension.minY());
+                                    out.writeInt(pos.getY() - dimension.minY());
                                 }
                             }
                         }
@@ -182,6 +219,18 @@ public final class CachedRegion implements ICachedRegion {
                     for (int z = 0; z < 32; z++) {
                         if (chunks[x][z] != null) {
                             out.writeLong(chunks[x][z].cacheTimestamp);
+                        }
+                    }
+                }
+                // ── V2: per-chunk blockTypesPresent ──────────────────────────
+                for (int x = 0; x < 32; x++) {
+                    for (int z = 0; z < 32; z++) {
+                        if (chunks[x][z] != null) {
+                            Set<String> types = chunks[x][z].getBlockTypesPresent();
+                            out.writeShort(types.size());
+                            for (String blockName : types) {
+                                out.writeUTF(blockName);
+                            }
                         }
                     }
                 }
@@ -214,17 +263,22 @@ public final class CachedRegion implements ICachedRegion {
                     DataInputStream in = new DataInputStream(gzipIn)
             ) {
                 int magic = in.readInt();
-                if (magic != CACHED_REGION_MAGIC) {
-                    // in the future, if we change the format on disk
-                    // we can keep converters for the old format
-                    // by switching on the magic value, and either loading it normally, or loading through a converter.
+                boolean isV2;
+                if (magic == CACHED_REGION_MAGIC_V2) {
+                    isV2 = true;
+                } else if (magic == CACHED_REGION_MAGIC) {
+                    isV2 = false;
+                } else {
                     throw new IOException("Bad magic value " + magic);
                 }
+
                 boolean[][] present = new boolean[32][32];
                 BitSet[][] bitSets = new BitSet[32][32];
                 Map<String, List<BlockPos>>[][] location = new Map[32][32];
                 BlockState[][][] overview = new BlockState[32][32][];
                 long[][] cacheTimestamp = new long[32][32];
+                Set<String>[][] blockTypes = new Set[32][32];
+
                 for (int x = 0; x < 32; x++) {
                     for (int z = 0; z < 32; z++) {
                         int isChunkPresent = in.read();
@@ -234,7 +288,6 @@ public final class CachedRegion implements ICachedRegion {
                                 in.readFully(bytes);
                                 bitSets[x][z] = BitSet.valueOf(bytes);
                                 location[x][z] = new HashMap<>();
-                                //this is top block in columns
                                 overview[x][z] = new BlockState[256];
                                 present[x][z] = true;
                                 break;
@@ -257,10 +310,6 @@ public final class CachedRegion implements ICachedRegion {
                 for (int x = 0; x < 32; x++) {
                     for (int z = 0; z < 32; z++) {
                         if (present[x][z]) {
-                            // 16 * 16 * 256 = 65536 so a short is enough
-                            // ^ haha jokes on leijurv, java doesn't have unsigned types so that isn't correct
-                            //   also why would you have more than 32767 special blocks in a chunk
-                            // haha double jokes on you now it works for 65535 not just 32767
                             int numSpecialBlockTypes = in.readShort() & 0xffff;
                             for (int i = 0; i < numSpecialBlockTypes; i++) {
                                 String blockName = in.readUTF();
@@ -269,7 +318,6 @@ public final class CachedRegion implements ICachedRegion {
                                 location[x][z].put(blockName, locs);
                                 int numLocations = in.readShort() & 0xffff;
                                 if (numLocations == 0) {
-                                    // an entire chunk full of air can happen in the end
                                     numLocations = 65536;
                                 }
                                 for (int j = 0; j < numLocations; j++) {
@@ -277,7 +325,7 @@ public final class CachedRegion implements ICachedRegion {
                                     int X = xz & 0x0f;
                                     int Z = (xz >>> 4) & 0x0f;
                                     int Y = in.readInt();
-                                    locs.add(new BlockPos(X, Y+dimension.minY(), Z));
+                                    locs.add(new BlockPos(X, Y + dimension.minY(), Z));
                                 }
                             }
                         }
@@ -290,7 +338,26 @@ public final class CachedRegion implements ICachedRegion {
                         }
                     }
                 }
+                // ── V2: read blockTypesPresent ───────────────────────────────
+                if (isV2) {
+                    for (int x = 0; x < 32; x++) {
+                        for (int z = 0; z < 32; z++) {
+                            if (present[x][z]) {
+                                int numTypes = in.readShort() & 0xffff;
+                                Set<String> types = new HashSet<>(numTypes);
+                                for (int i = 0; i < numTypes; i++) {
+                                    types.add(in.readUTF());
+                                }
+                                blockTypes[x][z] = types;
+                            } else {
+                                blockTypes[x][z] = Collections.emptySet();
+                            }
+                        }
+                    }
+                }
+
                 // only if the entire file was uncorrupted do we actually set the chunks
+                blockChunkIndex.clear();
                 for (int x = 0; x < 32; x++) {
                     for (int z = 0; z < 32; z++) {
                         if (present[x][z]) {
@@ -298,7 +365,31 @@ public final class CachedRegion implements ICachedRegion {
                             int regionZ = this.z;
                             int chunkX = x + 32 * regionX;
                             int chunkZ = z + 32 * regionZ;
-                            this.chunks[x][z] = new CachedChunk(chunkX, chunkZ, dimension.height(), bitSets[x][z], overview[x][z], location[x][z], cacheTimestamp[x][z]);
+                            Set<String> types = isV2 ? blockTypes[x][z] : Collections.emptySet();
+                            CachedChunk c = new CachedChunk(chunkX, chunkZ, dimension.height(),
+                                    bitSets[x][z], overview[x][z], location[x][z],
+                                    types, cacheTimestamp[x][z]);
+                            this.chunks[x][z] = c;
+                            // Build index from all block types present
+                            if (!types.isEmpty()) {
+                                int bit = x * 32 + z;
+                                for (String bt : types) {
+                                    blockChunkIndex.computeIfAbsent(bt, k -> new BitSet(1024)).set(bit);
+                                }
+                            }
+                        }
+                    }
+                }
+                // For V1 files, build index from specialBlockLocations (degraded but still useful)
+                if (!isV2) {
+                    for (int x = 0; x < 32; x++) {
+                        for (int z = 0; z < 32; z++) {
+                            if (present[x][z]) {
+                                int bit = x * 32 + z;
+                                for (String bt : location[x][z].keySet()) {
+                                    blockChunkIndex.computeIfAbsent(bt, k -> new BitSet(1024)).set(bit);
+                                }
+                            }
                         }
                     }
                 }
@@ -307,7 +398,7 @@ public final class CachedRegion implements ICachedRegion {
             hasUnsavedChanges = false;
             long end = System.nanoTime() / 1000000L;
             System.out.println("Loaded region successfully in " + (end - start) + "ms");
-        } catch (Exception ex) { // corrupted files can cause NullPointerExceptions as well as IOExceptions
+        } catch (Exception ex) {
             ex.printStackTrace();
         }
     }
@@ -323,6 +414,20 @@ public final class CachedRegion implements ICachedRegion {
             for (int z = 0; z < 32; z++) {
                 if (this.chunks[x][z] != null && this.chunks[x][z].cacheTimestamp < oldestAcceptableAge) {
                     System.out.println("Removing chunk " + (x + 32 * this.x) + "," + (z + 32 * this.z) + " because it was cached " + (now - this.chunks[x][z].cacheTimestamp) / 1000L + " seconds ago, and max age is " + expiry);
+                    // Remove from index
+                    CachedChunk old = this.chunks[x][z];
+                    if (old.getBlockTypesPresent() != null) {
+                        int bit = x * 32 + z;
+                        for (String bt : old.getBlockTypesPresent()) {
+                            BitSet bs = blockChunkIndex.get(bt);
+                            if (bs != null) {
+                                bs.clear(bit);
+                                if (bs.isEmpty()) {
+                                    blockChunkIndex.remove(bt);
+                                }
+                            }
+                        }
+                    }
                     this.chunks[x][z] = null;
                 }
             }
