@@ -17,6 +17,7 @@
 
 package baritone.command.defaults;
 
+import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.command.Command;
 import baritone.api.command.argument.IArgConsumer;
@@ -56,24 +57,43 @@ public class FindCommand extends Command {
         }
         Set<Block> blocksToKeepTrackOf = CachedChunk.getBlocksToKeepTrackOf();
         BetterBlockPos origin = ctx.playerFeet();
-        Component[] components = toFind.stream()
-                .filter(blocksToKeepTrackOf::contains)
-                .flatMap(block ->
-                        ctx.worldData().getCachedWorld().getLocationsOf(
-                                BuiltInRegistries.BLOCK.getKey(block).getPath(),
-                                Integer.MAX_VALUE,
-                                origin.x,
-                                origin.y,
-                                4
-                        ).stream()
-                )
-                .map(BetterBlockPos::new)
-                .map(this::positionToComponent)
-                .toArray(Component[]::new);
+        
+        // Warn about blocks that won't be tracked in future sessions
+        List<Block> untracked = toFind.stream()
+                .filter(b -> !blocksToKeepTrackOf.contains(b))
+                .toList();
+        if (!untracked.isEmpty()) {
+            logDirect("Note: some blocks are not in the persistent cache set. " +
+                    "Use #repack to index them for this session.");
+        }
+        
+        // Try cache-first; on empty result, re-pack loaded chunks and retry
+        Component[] components = null;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            components = toFind.stream()
+                    .flatMap(block ->
+                            ctx.worldData().getCachedWorld().getLocationsOf(
+                                    BuiltInRegistries.BLOCK.getKey(block).getPath(),
+                                    Integer.MAX_VALUE,
+                                    origin.x,
+                                    origin.y,
+                                    4
+                            ).stream()
+                    )
+                    .map(BetterBlockPos::new)
+                    .map(this::positionToComponent)
+                    .toArray(Component[]::new);
+            if (components.length > 0) {
+                break;
+            }
+            // Fallback: force-scan loaded chunks
+            BaritoneAPI.getProvider().getWorldScanner().repack(ctx);
+        }
+        
         if (components.length > 0) {
             Arrays.asList(components).forEach(this::logDirect);
         } else {
-            logDirect("No positions known, are you sure the blocks are cached?");
+            logDirect("No positions known, are you sure the blocks are in loaded chunks?");
         }
     }
 

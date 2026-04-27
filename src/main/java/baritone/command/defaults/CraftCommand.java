@@ -53,15 +53,15 @@ public class CraftCommand extends Command {
     public void execute(String label, IArgConsumer args) throws CommandException {
         args.requireMax(0);
 
-        ITaskPlan plan = baritone.getTaskPlanProcess()
-                .runInteractPlanByBlockName("crafting_table", 4);
-
-        if (plan == null) {
-            logDirect("Could not find any cached crafting tables nearby.");
+        boolean queueActive = baritone.getTaskPlanProcess().pendingCount() > 0;
+        ITaskPlan plan;
+        if (queueActive) {
+            baritone.getTaskPlanProcess().createInteractPlan("crafting_table", 4);
+            logDirect("Queued craft plan behind existing tasks. Use #task queue to see pending.");
             return;
-        }
-
-        logDirect("Pathing to nearest crafting table… Use #task status to monitor.");
+        } else {
+            plan = baritone.getTaskPlanProcess()
+                    .runInteractPlanByBlockName("craft
     }
 
     @Override

@@ -18,6 +18,7 @@
 package baritone.process;
 
 import baritone.Baritone;
+import baritone.api.BaritoneAPI;
 import baritone.api.event.listener.AbstractGameEventListener;
 import baritone.api.pathing.goals.GoalComposite;
 import baritone.api.pathing.goals.GoalGetToBlock;
@@ -203,6 +204,14 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
                 blockName, Integer.MAX_VALUE, pf.x, pf.z, maxSearchRadius);
 
         if (positions.isEmpty()) {
+            // Fallback: force-scan loaded chunks and retry
+            logDirect("TaskPlan[" + blockName + "]: cache miss, re-packing loaded chunks…");
+            BaritoneAPI.getProvider().getWorldScanner().repack(ctx);
+            positions = cachedWorld.getLocationsOf(
+                    blockName, Integer.MAX_VALUE, pf.x, pf.z, maxSearchRadius);
+        }
+
+        if (positions.isEmpty()) {
             logDirect("TaskPlan[" + blockName + "]: no cached positions found within "
                     + maxSearchRadius + " region(s)");
             return null;
@@ -216,6 +225,58 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
                 + " " + target.getY() + " " + target.getZ()
                 + " (distance " + Math.round(Math.sqrt(pf.distSqr(target))) + " blocks)");
         return runInteractPlan(target);
+    }
+
+    @Override
+    public void createInteractPlan(BlockPos target) {
+        if (target == null) throw new IllegalArgumentException("target must not be null");
+        TaskPlanImpl p = new TaskPlanImpl("interact_block");
+        p.addStep(STEP_PATH);
+        p.addStep(STEP_INTERACT);
+        // Assign targetPos before enqueuing so the plan has its context
+        // Note: targetPos is shared state — safe here because enqueuePlan
+        // only starts a NEW plan if one isn't running; otherwise it queues.
+        // We set targetPos via a queued-start mechanism.
+        enqueuePlan(p);
+        // The plan's targetPos must be set before it starts. Since enqueuePlan
+        // may start the plan immediately, set it now.
+        this.targetPos = target;
+    }
+
+    @Override
+    public void createInteractPlan(String blockName, int maxSearchRadius) {
+        if (blockName == null || blockName.isEmpty()) {
+            throw new IllegalArgumentException("blockName must not be null or empty");
+        }
+        var cachedWorld = baritone.getWorldProvider().getCurrentWorld().getCachedWorld();
+        if (cachedWorld == null) {
+            logDirect("TaskPlan[" + blockName + "]: no cached world available");
+            return;
+        }
+        BetterBlockPos pf = ctx.playerFeet();
+        ArrayList<BlockPos> positions = cachedWorld.getLocationsOf(
+                blockName, Integer.MAX_VALUE, pf.x, pf.z, maxSearchRadius);
+
+        if (positions.isEmpty()) {
+            logDirect("TaskPlan[" + blockName + "]: cache miss, re-packing loaded chunks…");
+            BaritoneAPI.getProvider().getWorldScanner().repack(ctx);
+            positions = cachedWorld.getLocationsOf(
+                    blockName, Integer.MAX_VALUE, pf.x, pf.z, maxSearchRadius);
+        }
+
+        if (positions.isEmpty()) {
+            logDirect("TaskPlan[" + blockName + "]: no cached positions found within "
+                    + maxSearchRadius + " region(s)");
+            return;
+        }
+
+        positions.sort((a, b) -> Double.compare(pf.distSqr(a), pf.distSqr(b)));
+        BlockPos target = positions.get(0);
+
+        logDirect("TaskPlan[" + blockName + "]: found nearest at " + target.getX()
+                + " " + target.getY() + " " + target.getZ()
+                + " (distance " + Math.round(Math.sqrt(pf.distSqr(target))) + " blocks)");
+        createInteractPlan(target);
     }
 
     @Override
@@ -716,9 +777,9 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         Optional<Rotation> reachable = RotationUtils.reachable(ctx, targetPos,
                 getInteractionReachDistance());
         if (!reachable.isPresent()) {
-            logDirect("TaskPlan: drifted away from bed during interaction");
-            failStep(TaskOutcome.UNREACHABLE);
-            return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+            // Not in range yet – re-path closer instead of failing immediately
+            return new PathingCommand(buildBedGoal(),
+                    PathingCommandType.REVALIDATE_GOAL_AND_PATH);
         }
         baritone.getLookBehavior().updateTarget(reachable.get(), true);
 

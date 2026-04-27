@@ -101,9 +101,18 @@ public class TaskCommand extends Command {
             case "chest":
                 executeChest(args);
                 break;
+            case "enqueue":
+                executeEnqueue(args);
+                break;
+            case "queue":
+                executeQueueStatus(args);
+                break;
+            case "clear":
+                executeClearQueue(args);
+                break;
             default:
                 throw new CommandInvalidTypeException(args.getConsumed().peekLast(),
-                        "status | cancel | sleep | interact | chest");
+                        "status | cancel | sleep | interact | chest | enqueue | queue | clear");
         }
     }
 
@@ -237,6 +246,45 @@ public class TaskCommand extends Command {
                 mode,
                 BuiltInRegistries.ITEM.getKey(item),
                 action.movesAllMatchingItems() ? "" : " x" + action.getCount()));
+    }
+
+    private void executeEnqueue(IArgConsumer args) throws CommandException {
+        args.requireMin(1);
+
+        // Block-name form: #task enqueue <block>
+        if (!args.has(3)) {
+            args.requireMax(1);
+            String blockArg = args.peekString();
+            net.minecraft.world.level.block.Block block = args.getDatatypeFor(BlockById.INSTANCE);
+            String registryName = BuiltInRegistries.BLOCK.getKey(block).getPath();
+            baritone.getTaskPlanProcess().createInteractPlan(registryName, 4);
+            logDirect("Queued interact plan for " + blockArg + ". Use #task queue to see pending.");
+            return;
+        }
+
+        // Coordinate form: #task enqueue <x> <y> <z>
+        args.requireExactly(3);
+        BetterBlockPos origin = ctx.playerFeet();
+        BlockPos target = CommandCoordParser.parseXYZ(args,
+                origin.getX(), origin.getY(), origin.getZ());
+
+        baritone.getTaskPlanProcess().createInteractPlan(target);
+        logDirect(String.format("Queued interact plan for %d %d %d. Use #task queue to see pending.",
+                target.getX(), target.getY(), target.getZ()));
+    }
+
+    private void executeQueueStatus(IArgConsumer args) throws CommandException {
+        args.requireMax(0);
+        int pending = baritone.getTaskPlanProcess().queueSize();
+        int total = baritone.getTaskPlanProcess().pendingCount();
+        logDirect(String.format("Task queue: %d pending, %d total (including active).",
+                pending, total));
+    }
+
+    private void executeClearQueue(IArgConsumer args) throws CommandException {
+        args.requireMax(0);
+        baritone.getTaskPlanProcess().clearQueue();
+        logDirect("Task queue cleared.");
     }
 
     @Override

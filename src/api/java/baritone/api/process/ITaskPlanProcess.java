@@ -147,4 +147,23 @@ public interface ITaskPlanProcess extends IBaritoneProcess {
      * @return the plan that was queued, or {@code null} if no block was found
      */
     ITaskPlan runInteractPlanByBlockName(String blockName, int maxSearchRadius);
+
+    /**
+     * Creates (but does not start) an interact plan and queues it via
+     * {@link #enqueuePlan(ITaskPlan)}.  If no plan is currently running
+     * the plan starts immediately.
+     *
+     * @param target the precise block position
+     */
+    void createInteractPlan(BlockPos target);
+
+    /**
+     * Creates (but does not start) an interact plan and queues it via
+     * {@link #enqueuePlan(ITaskPlan)}.  If no plan is currently running
+     * the plan starts immediately.
+     *
+     * @param blockName the registry path of the block (e.g. {@code "crafting_table"})
+     * @param maxSearchRadius radius in regions to search for cached positions
+     */
+    void createInteractPlan(String blockName, int maxSearchRadius);
 }
