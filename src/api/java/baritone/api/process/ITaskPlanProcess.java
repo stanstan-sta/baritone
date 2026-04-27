@@ -166,4 +166,73 @@ public interface ITaskPlanProcess extends IBaritoneProcess {
      * @param maxSearchRadius radius in regions to search for cached positions
      */
     void createInteractPlan(String blockName, int maxSearchRadius);
+
+    // ─── Container plan (auto-find) ─────────────────────────────────────────
+
+    /**
+     * Finds the nearest cached position of {@code blockName}, then runs
+     * a container plan on it with the given action.  If no position is
+     * found the plan is not started and {@code null} is returned.
+     *
+     * @param blockName the block registry path (e.g. {@code "chest"})
+     * @param action the container action to perform
+     * @param maxSearchRadius maximum region search radius from the player
+     * @return the plan that was started, or {@code null} if no block was found
+     */
+    ITaskPlan runContainerPlanByBlockName(String blockName, ContainerAction action, int maxSearchRadius);
+
+    /**
+     * Creates (but does not start) a container plan and queues it via
+     * {@link #enqueuePlan(ITaskPlan)}.  If no plan is currently running
+     * the plan starts immediately.
+     *
+     * @param target the block to interact with; must not be {@code null}
+     * @param action the action to perform on the container; must not be {@code null}
+     */
+    void createContainerPlan(BlockPos target, ContainerAction action);
+
+    /**
+     * Finds the nearest cached position of {@code blockName}, creates
+     * a container plan for it, and queues it via {@link #enqueuePlan(ITaskPlan)}.
+     * If no position is found the plan is not queued.
+     *
+     * @param blockName the block registry path (e.g. {@code "chest"})
+     * @param action the container action to perform
+     * @param maxSearchRadius maximum region search radius from the player
+     */
+    void createContainerPlanByBlockName(String blockName, ContainerAction action, int maxSearchRadius);
+
+    // ─── Sleep plan (create without running) ─────────────────────────────────
+
+    /**
+     * Creates (but does not start) a sleep plan and queues it via
+     * {@link #enqueuePlan(ITaskPlan)}.  If no plan is currently running
+     * the plan starts immediately.
+     */
+    void createSleepPlan();
+
+    // ─── Smelt plan ──────────────────────────────────────────────────────────
+
+    /**
+     * Runs a smelt plan to smelt the given item using the nearest
+     * furnace/blast-furnace/smoker.
+     *
+     * @param item the item to smelt; must not be {@code null}
+     * @param count how many to smelt; -1 for all
+     * @param furnaceBlockName the furnace type (e.g. {@code "furnace"}, {@code "blast_furnace"}, {@code "smoker"})
+     * @param maxSearchRadius maximum region search radius from the player
+     * @return the plan that was started, or {@code null} if no furnace was found
+     */
+    ITaskPlan runSmeltPlan(net.minecraft.world.item.Item item, int count, String furnaceBlockName, int maxSearchRadius);
+
+    /**
+     * Creates (but does not start) a smelt plan and queues it via
+     * {@link #enqueuePlan(ITaskPlan)}.
+     *
+     * @param item the item to smelt; must not be {@code null}
+     * @param count how many to smelt; -1 for all
+     * @param furnaceBlockName the furnace type (e.g. {@code "furnace"})
+     * @param maxSearchRadius maximum region search radius
+     */
+    void createSmeltPlan(net.minecraft.world.item.Item item, int count, String furnaceBlockName, int maxSearchRadius);
 }

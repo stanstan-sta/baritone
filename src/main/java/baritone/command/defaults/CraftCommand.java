@@ -61,7 +61,15 @@ public class CraftCommand extends Command {
             return;
         } else {
             plan = baritone.getTaskPlanProcess()
-                    .runInteractPlanByBlockName("craft
+                    .runInteractPlanByBlockName("crafting_table", 4);
+        }
+
+        if (plan == null) {
+            logDirect("Could not find any cached crafting tables nearby.");
+            return;
+        }
+
+        logDirect("Pathing to nearest crafting table… Use #task status to monitor.");
     }
 
     @Override

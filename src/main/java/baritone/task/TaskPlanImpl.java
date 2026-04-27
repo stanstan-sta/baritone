@@ -17,10 +17,14 @@
 
 package baritone.task;
 
+import baritone.api.task.ContainerAction;
 import baritone.api.task.ITaskPlan;
 import baritone.api.task.ITaskStep;
 import baritone.api.task.StepStatus;
 import baritone.api.task.TaskOutcome;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.level.block.Block;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -32,6 +36,10 @@ import java.util.List;
  * <p>Instances are created and managed exclusively by
  * {@link baritone.process.TaskPlanProcess}; callers receive them as the
  * read-only {@link ITaskPlan} interface.
+ *
+ * <p>Each plan carries its own execution context (target position, container
+ * action, smelt parameters, etc.) so that queued plans never corrupt each
+ * other's state.
  */
 public final class TaskPlanImpl implements ITaskPlan {
 
@@ -41,6 +49,19 @@ public final class TaskPlanImpl implements ITaskPlan {
     private volatile int currentStepIndex = -1;
     private volatile StepStatus status = StepStatus.PENDING;
     private volatile TaskOutcome outcome = null;
+
+    // ─── Per-plan execution context (isolated from process instance fields) ──
+    public BlockPos targetPos;
+    public ContainerAction containerAction;
+    public List<BlockPos> bedCandidates;
+
+    // Smelt plan context
+    public Item smeltItem;
+    public int smeltTargetCount = -1;
+    public int smeltedSoFar = 0;
+    public String smeltFurnaceName = "furnace";
+    public int smeltMonitorTick = 0;
+    public int smeltLoadPhase = 0;
 
     public TaskPlanImpl(String label) {
         this.label = label;

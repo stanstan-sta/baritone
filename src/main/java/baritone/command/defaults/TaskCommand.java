@@ -101,6 +101,9 @@ public class TaskCommand extends Command {
             case "chest":
                 executeChest(args);
                 break;
+            case "smelt":
+                executeSmelt(args);
+                break;
             case "enqueue":
                 executeEnqueue(args);
                 break;
@@ -246,6 +249,46 @@ public class TaskCommand extends Command {
                 mode,
                 BuiltInRegistries.ITEM.getKey(item),
                 action.movesAllMatchingItems() ? "" : " x" + action.getCount()));
+    }
+
+    private void executeSmelt(IArgConsumer args) throws CommandException {
+        args.requireMin(1);
+        // Parse: #task smelt <item> [count|all] [furnace_type]
+        Item item = args.getDatatypeFor(ItemById.INSTANCE);
+        int count = -1;
+        String furnaceType = "furnace";
+
+        if (args.hasAny()) {
+            String next = args.peekString().toLowerCase();
+            try {
+                count = Integer.parseInt(next);
+                args.getString();
+            } catch (NumberFormatException e) {
+                if ("all".equals(next) || "max".equals(next)) {
+                    args.getString();
+                } else {
+                    // Treat as furnace type
+                }
+            }
+        }
+
+        if (args.hasAny()) {
+            String candidate = args.peekString().toLowerCase();
+            if (candidate.equals("furnace") || candidate.equals("blast_furnace") || candidate.equals("smoker")) {
+                furnaceType = args.getString();
+            }
+        }
+        args.requireMax(0);
+
+        ITaskPlan plan = baritone.getTaskPlanProcess()
+                .runSmeltPlan(item, count, furnaceType, 4);
+        if (plan == null) {
+            logDirect("Could not find a " + furnaceType + " nearby.");
+            return;
+        }
+        logDirect(String.format("Started smelt plan for %s (%s). Use #task status to monitor.",
+                BuiltInRegistries.ITEM.getKey(item),
+                count > 0 ? "x" + count : "all"));
     }
 
     private void executeEnqueue(IArgConsumer args) throws CommandException {
