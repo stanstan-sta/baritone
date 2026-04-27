@@ -168,7 +168,7 @@ public class TaskCommand extends Command {
             args.requireMax(1);
             String blockArg = args.peekString();
             net.minecraft.world.level.block.Block block = args.getDatatypeFor(BlockById.INSTANCE);
-            String registryName = BuiltInRegistries.BLOCK.getKey(block).toString();
+            String registryName = BuiltInRegistries.BLOCK.getKey(block).getPath();
             ITaskPlan plan = baritone.getTaskPlanProcess().runInteractPlanByBlockName(registryName, 4);
             if (plan == null) {
                 logDirect("Could not find any cached positions for " + blockArg);

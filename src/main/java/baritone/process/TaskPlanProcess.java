@@ -377,7 +377,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
             case STEP_PATH:
                 return tickPathToBlock(calcFailed);
             case STEP_INTERACT:
-                return tickInteractWithBlock();
+                return tickInteractWithBlock(calcFailed);
                 
             // ── Container plan ─────────────────────────────────────────────────
             case STEP_AWAIT_CONTAINER:
@@ -430,19 +430,31 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
                 PathingCommandType.REVALIDATE_GOAL_AND_PATH);
     }
 
-    private PathingCommand tickInteractWithBlock() {
+    private PathingCommand tickInteractWithBlock(boolean calcFailed) {
         if (targetPos == null) {
             failStep(TaskOutcome.NOT_FOUND);
             return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
         }
+        if (calcFailed) {
+            calcFailCount++;
+            if (calcFailCount >= MAX_CALC_FAILURES) {
+                logDirect("TaskPlan: INTERACT unreachable after " + calcFailCount + " calculation failures");
+                failStep(TaskOutcome.UNREACHABLE);
+                return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+            }
+        }
         Optional<Rotation> reachable = RotationUtils.reachable(ctx, targetPos,
                 getInteractionReachDistance());
         if (!reachable.isPresent()) {
-            // Fell out of range – re-path
-            logDirect("TaskPlan: drifted out of range during INTERACT, re-pathing");
-            failStep(TaskOutcome.UNREACHABLE);
-            return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+            // Not in range yet – re-path closer instead of failing immediately
+            interactTick = 0;
+            return new PathingCommand(new GoalGetToBlock(targetPos),
+                    PathingCommandType.REVALIDATE_GOAL_AND_PATH);
         }
+
+        // Apply the raycast-correct look rotation so the server-side
+        // interaction check succeeds.
+        baritone.getLookBehavior().updateTarget(reachable.get(), true);
 
         if (interactTick == 0 || interactTick % 4 == 0) {
             sendUsePacket(targetPos);

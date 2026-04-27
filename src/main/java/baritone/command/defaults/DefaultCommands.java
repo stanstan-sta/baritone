@@ -71,7 +71,8 @@ public final class DefaultCommands {
                 new ElytraCommand(baritone),
                 new InteractCommand(baritone),
                 new SleepCommand(baritone),
-                new TaskCommand(baritone)
+                new TaskCommand(baritone),
+                new CraftCommand(baritone)
         ));
         ExecutionControlCommands prc = new ExecutionControlCommands(baritone);
         commands.add(prc.pauseCommand);
