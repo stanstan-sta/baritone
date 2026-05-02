@@ -72,9 +72,9 @@ import java.util.Optional;
  * <h2>Built-in plan types</h2>
  * <dl>
  *   <dt>Interact plan ({@link #runInteractPlan})</dt>
- *   <dd>Steps: PATH_TO_BLOCK → INTERACT_WITH_BLOCK</dd>
+ *   <dd>Steps: PATH_TO_BLOCK &rarr; INTERACT_WITH_BLOCK</dd>
  *   <dt>Sleep plan ({@link #runSleepPlan})</dt>
- *   <dd>Steps: SCAN_FOR_BED → PATH_TO_BED → INTERACT_WITH_BED → VERIFY_SLEEP</dd>
+ *   <dd>Steps: SCAN_FOR_BED &rarr; PATH_TO_BED &rarr; INTERACT_WITH_BED &rarr; VERIFY_SLEEP</dd>
  * </dl>
  *
  * <h2>Death policy</h2>
@@ -85,29 +85,29 @@ import java.util.Optional;
 public final class TaskPlanProcess extends BaritoneProcessHelper
         implements ITaskPlanProcess, AbstractGameEventListener {
 
-    // ── Interact-plan step tags ──────────────────────────────────────────────
+    // -- Interact-plan step tags ----------------------------------------------
     private static final String STEP_PATH   = "Path to block";
     private static final String STEP_INTERACT = "Interact with block";
 
-    // ── Sleep-plan step tags ─────────────────────────────────────────────────
+    // -- Sleep-plan step tags -------------------------------------------------
     private static final String STEP_SCAN   = "Scan for bed";
     private static final String STEP_BED_PATH = "Path to bed";
     private static final String STEP_BED_INTERACT = "Interact with bed";
     private static final String STEP_BED_VERIFY = "Verify sleep";
 
-    // ── Container-plan step tags ─────────────────────────────────────────────
+    // -- Container-plan step tags ---------------------------------------------
     private static final String STEP_AWAIT_CONTAINER = "Wait for container";
     private static final String STEP_TRANSFER_ITEMS = "Transfer items";
     private static final String STEP_CLOSE_CONTAINER = "Close container";
 
-    // ── Timeouts / retry limits ──────────────────────────────────────────────
+    // -- Timeouts / retry limits ----------------------------------------------
     private static final int MAX_CALC_FAILURES  = 3;
     private static final int INTERACT_TIMEOUT   = 40;
     private static final int SLEEP_VERIFY_TICKS = 60;
     private static final int BED_SCAN_RADIUS    = 64;
     private static final long NIGHT_START_TICK  = 12542L;
 
-    // ── Smelt-plan step tags ──────────────────────────────────────────────────
+    // -- Smelt-plan step tags --------------------------------------------------
     private static final String STEP_FIND_FURNACE = "Find furnace";
     private static final String STEP_AWAIT_FURNACE_MENU = "Wait for furnace";
     private static final String STEP_LOAD_FURNACE   = "Load furnace";
@@ -128,19 +128,19 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
             Blocks.BLACK_BED
     );
 
-    // ── Transfer finite-state-machine phases ──────────────────────────────────
+    // -- Transfer finite-state-machine phases ----------------------------------
     private static final int TRANSFER_PHASE_NONE = 0;
     private static final int TRANSFER_PHASE_PULL_EXACT = 1;
     private static final int TRANSFER_PHASE_PLACE_TEMP = 2;
     private static final int TRANSFER_PHASE_RETURN_EXCESS = 3;
     private static final int TRANSFER_PHASE_DEPOSIT_REMAINING = 4;
 
-    // ── Process-level state (queue + transient per-tick counters) ─────────────
+    // -- Process-level state (queue + transient per-tick counters) -------------
     private final Deque<TaskPlanImpl> planQueue = new ArrayDeque<>();
     private TaskPlanImpl plan;
     private int stepIdx;
 
-    // Transient, reset between steps — only valid while a plan is running.
+    // Transient, reset between steps -- only valid while a plan is running.
     private int interactTick;
     private int calcFailCount;
     private int verifyTick;
@@ -156,7 +156,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         baritone.getGameEventHandler().registerEventListener(this);
     }
 
-    // ─── ITaskPlanProcess ─────────────────────────────────────────────────────
+    // --- ITaskPlanProcess -----------------------------------------------------
 
     @Override
     public void runPlan(ITaskPlan plan) {
@@ -167,7 +167,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         advanceToStep(0);
     }
 
-    // ── Factory: run variants ─────────────────────────────────────────────────
+    // -- Factory: run variants -------------------------------------------------
 
     @Override
     public ITaskPlan runSleepPlan() {
@@ -237,7 +237,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         return p;
     }
 
-    // ── Factory: create / enqueue variants ────────────────────────────────────
+    // -- Factory: create / enqueue variants ------------------------------------
 
     @Override
     public void createInteractPlan(BlockPos target) {
@@ -299,6 +299,96 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         enqueuePlan(p);
     }
 
+    @Override
+    public ITaskPlan runSmeltAllItems(String furnaceBlockName, int maxSearchRadius) {
+        List<net.minecraft.world.item.Item> smeltable = findSmeltableItemsInInventory();
+        if (smeltable.isEmpty()) {
+            logDirect("TaskPlan: no smeltable items found in inventory");
+            return null;
+        }
+        if (furnaceBlockName == null || furnaceBlockName.isEmpty()) furnaceBlockName = "furnace";
+        ITaskPlan first = null;
+        for (int i = 0; i < smeltable.size(); i++) {
+            TaskPlanImpl p = buildSmeltPlan(smeltable.get(i), -1, furnaceBlockName, maxSearchRadius);
+            if (i == 0) {
+                runPlan(p);
+                first = p;
+            } else {
+                enqueuePlan(p);
+            }
+        }
+        logDirect(String.format("TaskPlan: smelt-all queued %d item type(s) on %s",
+                smeltable.size(), furnaceBlockName));
+        return first;
+    }
+
+    @Override
+    public void createSmeltAllItems(String furnaceBlockName, int maxSearchRadius) {
+        List<net.minecraft.world.item.Item> smeltable = findSmeltableItemsInInventory();
+        if (smeltable.isEmpty()) {
+            logDirect("TaskPlan: no smeltable items found in inventory");
+            return;
+        }
+        if (furnaceBlockName == null || furnaceBlockName.isEmpty()) furnaceBlockName = "furnace";
+        for (net.minecraft.world.item.Item item : smeltable) {
+            TaskPlanImpl p = buildSmeltPlan(item, -1, furnaceBlockName, maxSearchRadius);
+            enqueuePlan(p);
+        }
+        logDirect(String.format("TaskPlan: smelt-all queued %d item type(s) on %s",
+                smeltable.size(), furnaceBlockName));
+    }
+
+    private List<net.minecraft.world.item.Item> findSmeltableItemsInInventory() {
+        java.util.LinkedHashSet<net.minecraft.world.item.Item> found = new java.util.LinkedHashSet<>();
+        var player = baritone.getPlayerContext().player();
+        for (int i = 0; i < player.getInventory().items.size(); i++) {
+            net.minecraft.world.item.ItemStack stack = player.getInventory().items.get(i);
+            if (stack.isEmpty()) continue;
+            net.minecraft.world.item.Item item = stack.getItem();
+            if (isSmeltableItem(item)) {
+                found.add(item);
+            }
+        }
+        return new ArrayList<>(found);
+    }
+
+    private boolean isSmeltableItem(net.minecraft.world.item.Item item) {
+        // Raw ores
+        if (item == Items.RAW_IRON || item == Items.RAW_COPPER || item == Items.RAW_GOLD) {
+            return true;
+        }
+        // Traditional furnace inputs
+        if (item == Items.COBBLESTONE || item == Items.SAND
+                || item == Items.CLAY_BALL || item == Items.NETHERRACK
+                || item == Items.ANCIENT_DEBRIS || item == Items.CACTUS
+                || item == Items.WET_SPONGE || item == Items.SEA_PICKLE
+                || item == Items.CHORUS_FRUIT) {
+            return true;
+        }
+        // Food items (smoker)
+        if (item == Items.BEEF || item == Items.PORKCHOP || item == Items.MUTTON
+                || item == Items.CHICKEN || item == Items.RABBIT
+                || item == Items.COD || item == Items.SALMON
+                || item == Items.POTATO || item == Items.KELP) {
+            return true;
+        }
+        // Ore blocks (furnace / blast furnace)
+        if (item instanceof BlockItem bi) {
+            BlockState state = bi.getBlock().defaultBlockState();
+            if (state.is(BlockTags.IRON_ORES) || state.is(BlockTags.COPPER_ORES)
+                    || state.is(BlockTags.GOLD_ORES) || state.is(BlockTags.COAL_ORES)
+                    || state.is(BlockTags.DIAMOND_ORES) || state.is(BlockTags.EMERALD_ORES)
+                    || state.is(BlockTags.LAPIS_ORES) || state.is(BlockTags.REDSTONE_ORES)) {
+                return true;
+            }
+            if (bi.getBlock() == Blocks.NETHER_GOLD_ORE
+                    || bi.getBlock() == Blocks.NETHER_QUARTZ_ORE) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private TaskPlanImpl buildSmeltPlan(net.minecraft.world.item.Item item, int count, String furnaceName, int maxSearchRadius) {
         TaskPlanImpl p = new TaskPlanImpl("smelt_items");
         p.addStep(STEP_FIND_FURNACE);
@@ -322,7 +412,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         return p;
     }
 
-    // ─── Introspection ────────────────────────────────────────────────────────
+    // --- Introspection --------------------------------------------------------
 
     @Override
     public ITaskPlan currentPlan() { return plan; }
@@ -413,12 +503,12 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
     @Override
     public void onPlayerDeath() {
         if (isActive()) {
-            logDirect("TaskPlan: player died – aborting plan '" + plan.label() + "'");
+            logDirect("TaskPlan: player died - aborting plan '" + plan.label() + "'");
             abortPlan(TaskOutcome.PLAYER_DIED);
         }
     }
 
-    // ─── Step dispatch ────────────────────────────────────────────────────────
+    // --- Step dispatch --------------------------------------------------------
 
     private PathingCommand dispatchStep(String tag, boolean calcFailed, boolean isSafeToCancel) {
         switch (tag) {
@@ -443,7 +533,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         }
     }
 
-    // ── Interact-plan step handlers (use plan.targetPos) ──────────────────────
+    // -- Interact-plan step handlers (use plan.targetPos) ----------------------
 
     private PathingCommand tickPathToBlock(boolean calcFailed) {
         BlockPos tp = plan.targetPos;
@@ -495,7 +585,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         return pause();
     }
 
-    // ── Container-plan step handlers (use plan.containerAction) ───────────────
+    // -- Container-plan step handlers (use plan.containerAction) ---------------
 
     private PathingCommand tickAwaitContainer() {
         if (!(ctx.player().containerMenu instanceof InventoryMenu)) { succeedStep(); return pause(); }
@@ -571,7 +661,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         return pause();
     }
 
-    // ── Sleep-plan step handlers (use plan.targetPos / plan.bedCandidates) ────
+    // -- Sleep-plan step handlers (use plan.targetPos / plan.bedCandidates) ----
 
     private PathingCommand tickScanForBed() {
         if (!isNightOrThunder()) { failStep(TaskOutcome.NOT_NIGHT); return cancelPath(); }
@@ -650,7 +740,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         return pause();
     }
 
-    // ── Smelt-plan step handlers (use plan.smeltItem and friends) ─────────────
+    // -- Smelt-plan step handlers (use plan.smeltItem and friends) -------------
 
     private PathingCommand tickFindFurnace() {
         if (plan.smeltFurnaceName == null || plan.smeltFurnaceName.isEmpty()) plan.smeltFurnaceName = "furnace";
@@ -750,7 +840,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
                 plan.smeltLoadPhase = LOAD_PHASE_FUEL;
                 plan.smeltMonitorTick = 0;
                 ctx.player().closeContainer();
-                stepIdx = 0; // next tick resumes at PATH to reach the next furnace target
+                stepIdx = 0;
             } else if (++plan.smeltNoWorkVisits < plan.smeltFurnaces.size()) {
                 advanceSmeltFurnaceTarget();
                 plan.smeltLoadPhase = LOAD_PHASE_FUEL;
@@ -761,7 +851,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         } else if (hasSmeltInputInInventory(menu)) {
             plan.smeltLoadPhase = LOAD_PHASE_FUEL;
             plan.smeltMonitorTick = 0;
-            stepIdx = 3; // next tick resumes at LOAD_FURNACE while the same furnace menu stays open
+            stepIdx = 3;
         }
         succeedStep();
         return pause();
@@ -913,7 +1003,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         return List.copyOf(found);
     }
 
-    // ─── Plan/step lifecycle helpers ─────────────────────────────────────────
+    // --- Plan/step lifecycle helpers -----------------------------------------
 
     private void advanceToStep(int idx) {
         interactTick = calcFailCount = verifyTick = 0;
@@ -970,7 +1060,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         planQueue.clear();
     }
 
-    // ─── Block-finding utilities ──────────────────────────────────────────────
+    // --- Block-finding utilities ----------------------------------------------
 
     private BlockPos findPositionForBlock(String blockName, int maxSearchRadius) {
         var cachedWorld = baritone.getWorldProvider().getCurrentWorld().getCachedWorld();
@@ -1014,7 +1104,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         return null;
     }
 
-    // ─── World helpers ────────────────────────────────────────────────────────
+    // --- World helpers --------------------------------------------------------
 
     private List<BlockPos> findNearbyBeds() {
         List<BlockPos> r = new ArrayList<>();
@@ -1050,7 +1140,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         ctx.playerController().processRightClickBlock(ctx.player(), ctx.world(), InteractionHand.MAIN_HAND, new BlockHitResult(hit, face, pos, false));
     }
 
-    // ─── Slot helpers ─────────────────────────────────────────────────────────
+    // --- Slot helpers ---------------------------------------------------------
     private int findTransferSourceSlot(AbstractContainerMenu menu, ContainerAction action) {
         if (action == null) return -1;
         if (action.getType() == ContainerAction.Type.DUMP_ALL) return findFirstMovablePlayerSlot(menu, null);

@@ -235,4 +235,25 @@ public interface ITaskPlanProcess extends IBaritoneProcess {
      * @param maxSearchRadius maximum region search radius
      */
     void createSmeltPlan(net.minecraft.world.item.Item item, int count, String furnaceBlockName, int maxSearchRadius);
+
+    // ─── Smelt-all plan ───────────────────────────────────────────────────────
+
+    /**
+     * Runs a smelt-all plan that scans the player's inventory for every
+     * smeltable item type and queues sequential smelt plans (one per type).
+     *
+     * @param furnaceBlockName the furnace type (e.g. {@code "furnace"}, {@code "blast_furnace"}, {@code "smoker"})
+     * @param maxSearchRadius maximum region search radius from the player
+     * @return the first plan that was started, or {@code null} if no furnace was found
+     */
+    ITaskPlan runSmeltAllItems(String furnaceBlockName, int maxSearchRadius);
+
+    /**
+     * Creates (but does not start) sequential smelt-all plans and queues them
+     * via {@link #enqueuePlan(ITaskPlan)}.
+     *
+     * @param furnaceBlockName the furnace type (e.g. {@code "furnace"})
+     * @param maxSearchRadius maximum region search radius
+     */
+    void createSmeltAllItems(String furnaceBlockName, int maxSearchRadius);
 }

@@ -42,37 +42,6 @@ import java.util.stream.Stream;
  *
  * <p>Controls and inspects multi-step task plans executed by
  * {@link baritone.api.process.ITaskPlanProcess}.
- *
- * <h3>Subcommands</h3>
- * <dl>
- *   <dt>{@code status}</dt>
- *   <dd>Print the status of the currently running plan and each of its steps.
- *       Machine-readable wire strings (e.g. {@code "running"}, {@code "succeeded"})
- *       are shown for each step so LLM bridge consumers can parse the output.</dd>
- *
- *   <dt>{@code cancel}</dt>
- *   <dd>Cancel the currently running plan immediately.  The plan outcome is set
- *       to {@code cancelled}.</dd>
- *
- *   <dt>{@code sleep}</dt>
- *   <dd>Start a pre-built "sleep in nearest bed" multi-step plan:
- *       scan → path → interact → verify.  Equivalent to {@code #sleep} but
- *       executed through the TaskPlanProcess framework so each step is
- *       individually tracked and can be inspected via {@code #task status}.</dd>
- *
- *   <dt>{@code interact <x> <y> <z>}</dt>
- *   <dd>Start a pre-built "interact with block" multi-step plan:
- *       path → interact.  Equivalent to {@code #interact x y z} but executed
- *       through the TaskPlanProcess so each step is tracked.</dd>
- * </dl>
- *
- * <h3>Examples</h3>
- * <pre>
- *   #task sleep               – run the sleep plan
- *   #task interact 100 64 200 – run the interact plan for that block
- *   #task status              – print current plan + step statuses
- *   #task cancel              – abort the active plan
- * </pre>
  */
 public class TaskCommand extends Command {
 
@@ -115,11 +84,11 @@ public class TaskCommand extends Command {
                 break;
             default:
                 throw new CommandInvalidTypeException(args.getConsumed().peekLast(),
-                        "status | cancel | sleep | interact | chest | enqueue | queue | clear");
+                        "status | cancel | sleep | interact | chest | smelt | enqueue | queue | clear");
         }
     }
 
-    // ─── Subcommand handlers ──────────────────────────────────────────────────
+    // --- Subcommand handlers --------------------------------------------------
 
     private void executeStatus(IArgConsumer args) throws CommandException {
         args.requireMax(0);
@@ -129,7 +98,6 @@ public class TaskCommand extends Command {
             return;
         }
 
-        // Header line: plan label + aggregate status + outcome (if finished)
         String planLine = String.format("Plan '%s'  status=%s",
                 plan.label(),
                 plan.status().name().toLowerCase());
@@ -138,17 +106,16 @@ public class TaskCommand extends Command {
         }
         logDirect(planLine);
 
-        // Per-step detail
         List<ITaskStep> steps = plan.steps();
         for (int i = 0; i < steps.size(); i++) {
             ITaskStep step = steps.get(i);
-            String marker = (i == plan.currentStepIndex()) ? "► " : "  ";
+            String marker = (i == plan.currentStepIndex()) ? "\u25ba " : "  ";
             String stepLine = String.format("%s[%d] %s  %s",
                     marker, i + 1,
                     step.description(),
                     step.status().name().toLowerCase());
             if (step.outcome() != null) {
-                stepLine += "  → " + step.outcome().toWireString();
+                stepLine += "  \u2192 " + step.outcome().toWireString();
             }
             logDirect(stepLine);
         }
@@ -175,7 +142,6 @@ public class TaskCommand extends Command {
         args.requireMin(1);
 
         // Block-name form: #task interact <block>
-        // (1 non-coordinate argument)
         if (!args.has(3)) {
             args.requireMax(1);
             String blockArg = args.peekString();
@@ -205,7 +171,7 @@ public class TaskCommand extends Command {
                 plan.steps().size()));
     }
 
-    // ─── ICommand ────────────────────────────────────────────────────────────
+    // --- Chest subcommand ----------------------------------------------------
 
     private void executeChest(IArgConsumer args) throws CommandException {
         args.requireMin(5);
@@ -251,8 +217,33 @@ public class TaskCommand extends Command {
                 action.movesAllMatchingItems() ? "" : " x" + action.getCount()));
     }
 
+    // --- Smelt subcommand ----------------------------------------------------
+
     private void executeSmelt(IArgConsumer args) throws CommandException {
         args.requireMin(1);
+
+        // Check for smelt-all form: #task smelt all [furnace_type]
+        String first = args.peekString().toLowerCase();
+        if ("all".equals(first)) {
+            args.getString(); // consume "all"
+            String furnaceType = "furnace";
+            if (args.hasAny()) {
+                String candidate = args.peekString().toLowerCase();
+                if (candidate.equals("furnace") || candidate.equals("blast_furnace") || candidate.equals("smoker")) {
+                    furnaceType = args.getString();
+                }
+            }
+            args.requireMax(0);
+            ITaskPlan plan = baritone.getTaskPlanProcess()
+                    .runSmeltAllItems(furnaceType, 4);
+            if (plan == null) {
+                logDirect("Could not find a " + furnaceType + " nearby or no smeltable items in inventory.");
+                return;
+            }
+            logDirect(String.format("Started smelt-all plan on %s. Use #task status to monitor.", furnaceType));
+            return;
+        }
+
         // Parse: #task smelt <item> [count|all] [furnace_type]
         Item item = args.getDatatypeFor(ItemById.INSTANCE);
         int count = -1;
@@ -290,6 +281,8 @@ public class TaskCommand extends Command {
                 BuiltInRegistries.ITEM.getKey(item),
                 count > 0 ? "x" + count : "all"));
     }
+
+    // --- Enqueue subcommand --------------------------------------------------
 
     private void executeEnqueue(IArgConsumer args) throws CommandException {
         args.requireMin(1);
@@ -330,21 +323,21 @@ public class TaskCommand extends Command {
         logDirect("Task queue cleared.");
     }
 
+    // --- Tab completion ------------------------------------------------------
+
     @Override
     public Stream<String> tabComplete(String label, IArgConsumer args) {
         if (!args.hasAny()) return Stream.empty();
         if (!args.has(2)) {
-            // First token: offer subcommands
             String prefix;
             try {
                 prefix = args.peekString().toLowerCase();
             } catch (baritone.api.command.exception.CommandNotEnoughArgumentsException e) {
                 return Stream.empty();
             }
-            return Stream.of("status", "cancel", "sleep", "interact", "chest")
+            return Stream.of("status", "cancel", "sleep", "interact", "chest", "smelt")
                     .filter(s -> s.startsWith(prefix));
         }
-        // Second token onward: if subcommand is "interact" offer coordinate hints
         return Stream.empty();
     }
 
@@ -366,26 +359,18 @@ public class TaskCommand extends Command {
                 "immediately aborted with outcome 'player_died' and all state is cleared.",
                 "",
                 "Subcommands:",
-                "  status               – print current plan and per-step statuses",
-                "  cancel               – abort the active plan (outcome: cancelled)",
-                "  sleep                – run the built-in sleep plan (4 steps)",
-                "  interact <x> <y> <z> – run the built-in interact plan for a block",
-                "",
-                "Output format for 'status':",
-                "  Plan '<label>'  status=running",
-                "  ► [1] Scan for bed   running",
-                "    [2] Path to bed    pending",
-                "    [3] Interact       pending",
-                "    [4] Verify sleep   pending",
+                "  status               - print current plan and per-step statuses",
+                "  cancel               - abort the active plan (outcome: cancelled)",
+                "  sleep                - run the built-in sleep plan (4 steps)",
+                "  interact <x> <y> <z> - run the built-in interact plan for a block",
                 "",
                 "Usage:",
                 "> #task sleep",
                 "> #task interact 100 64 200",
-                "> #task interact ~ ~1 ~",
+                "> #task smelt iron_ore all",
+                "> #task smelt all",
                 "> #task status",
-                "> #task cancel",
-                "",
-                "See also: #interact (quick single-step interact), #sleep (quick sleep)"
+                "> #task cancel"
         );
     }
 }
