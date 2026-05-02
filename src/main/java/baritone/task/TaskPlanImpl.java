@@ -57,11 +57,17 @@ public final class TaskPlanImpl implements ITaskPlan {
 
     // Smelt plan context
     public Item smeltItem;
+    public List<Item> smeltItems = List.of();
+    public List<BlockPos> smeltFurnaces = List.of();
+    public int smeltFurnaceIndex = 0;
+    public int smeltMaxSearchRadius = 4;
     public int smeltTargetCount = -1;
     public int smeltedSoFar = 0;
     public String smeltFurnaceName = "furnace";
     public int smeltMonitorTick = 0;
     public int smeltLoadPhase = 0;
+    public int smeltNoWorkVisits = 0;
+    public boolean smeltDidWorkAtCurrentFurnace = false;
 
     public TaskPlanImpl(String label) {
         this.label = label;

@@ -38,15 +38,18 @@ import baritone.task.TaskStepImpl;
 import baritone.utils.BaritoneProcessHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -56,7 +59,10 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.Optional;
 
 /**
@@ -109,6 +115,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
     private static final String STEP_COLLECT_OUTPUT  = "Collect output";
 
     private static final int SMELT_TIMEOUT_TICKS = 1200;
+    private static final int SMELT_ROTATION_TICKS = 10;
     private static final int LOAD_PHASE_FUEL = 0;
     private static final int LOAD_PHASE_INPUT = 1;
 
@@ -225,7 +232,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
 
     @Override
     public ITaskPlan runSmeltPlan(net.minecraft.world.item.Item item, int count, String furnaceBlockName, int maxSearchRadius) {
-        TaskPlanImpl p = buildSmeltPlan(item, count, furnaceBlockName);
+        TaskPlanImpl p = buildSmeltPlan(item, count, furnaceBlockName, maxSearchRadius);
         runPlan(p);
         return p;
     }
@@ -288,11 +295,11 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
 
     @Override
     public void createSmeltPlan(net.minecraft.world.item.Item item, int count, String furnaceBlockName, int maxSearchRadius) {
-        TaskPlanImpl p = buildSmeltPlan(item, count, furnaceBlockName);
+        TaskPlanImpl p = buildSmeltPlan(item, count, furnaceBlockName, maxSearchRadius);
         enqueuePlan(p);
     }
 
-    private TaskPlanImpl buildSmeltPlan(net.minecraft.world.item.Item item, int count, String furnaceName) {
+    private TaskPlanImpl buildSmeltPlan(net.minecraft.world.item.Item item, int count, String furnaceName, int maxSearchRadius) {
         TaskPlanImpl p = new TaskPlanImpl("smelt_items");
         p.addStep(STEP_FIND_FURNACE);
         p.addStep(STEP_PATH);
@@ -303,11 +310,15 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         p.addStep(STEP_COLLECT_OUTPUT);
         p.addStep(STEP_CLOSE_CONTAINER);
         p.smeltItem = item;
+        p.smeltItems = resolveSmeltInputs(item);
         p.smeltTargetCount = count;
         p.smeltFurnaceName = furnaceName;
+        p.smeltMaxSearchRadius = Math.max(0, maxSearchRadius);
         p.smeltedSoFar = 0;
         p.smeltMonitorTick = 0;
         p.smeltLoadPhase = LOAD_PHASE_FUEL;
+        p.smeltNoWorkVisits = 0;
+        p.smeltDidWorkAtCurrentFurnace = false;
         return p;
     }
 
@@ -644,9 +655,16 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
     private PathingCommand tickFindFurnace() {
         if (plan.smeltFurnaceName == null || plan.smeltFurnaceName.isEmpty()) plan.smeltFurnaceName = "furnace";
         net.minecraft.world.level.block.Block fb = blockFromName(plan.smeltFurnaceName);
-        BlockPos target = findNearestBlock(plan.smeltFurnaceName, fb, 4);
+        BlockPos target = findNearestBlock(plan.smeltFurnaceName, fb, plan.smeltMaxSearchRadius);
         if (target == null) { failStep(TaskOutcome.NOT_FOUND); return cancelPath(); }
-        plan.targetPos = target;
+        plan.smeltFurnaces = findConnectedFurnaces(target, fb);
+        if (plan.smeltFurnaces.isEmpty()) {
+            plan.smeltFurnaces = List.of(target);
+        }
+        plan.smeltFurnaceIndex = 0;
+        plan.targetPos = plan.smeltFurnaces.get(0);
+        plan.smeltNoWorkVisits = 0;
+        plan.smeltDidWorkAtCurrentFurnace = false;
         succeedStep();
         return pause();
     }
@@ -663,26 +681,25 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         if (plan.smeltItem == null) { succeedStep(); return pause(); }
         int fuelSlot = 1, inputSlot = 0, playerInvStart = firstPlayerInventorySlot(menu);
         if (plan.smeltLoadPhase == LOAD_PHASE_FUEL) {
-            if (!menu.getSlot(fuelSlot).hasItem() || menu.getSlot(fuelSlot).getItem().getCount() <= 0) {
-                int fuelSrc = -1;
-                for (int i = playerInvStart; i < menu.slots.size(); i++)
-                    if (menu.getSlot(i).hasItem() && menu.getSlot(i).getItem().getItem() == net.minecraft.world.item.Items.COAL) { fuelSrc = i; break; }
+            boolean hasInputReady = hasSmeltInputInInventory(menu) || isSmeltInputSlot(menu.getSlot(inputSlot));
+            if (hasInputReady && !hasUsableFuel(menu.getSlot(fuelSlot))) {
+                int fuelSrc = findFuelSlot(menu, playerInvStart);
                 if (fuelSrc < 0) { failStep(TaskOutcome.INTERACTION_FAILED); return cancelPath(); }
                 ctx.playerController().windowClick(menu.containerId, fuelSrc, 0, ClickType.QUICK_MOVE, ctx.player());
+                plan.smeltDidWorkAtCurrentFurnace = true;
                 return pause();
             }
             plan.smeltLoadPhase = LOAD_PHASE_INPUT;
             return pause();
         }
-        int inputInInv = 0;
-        for (int i = playerInvStart; i < menu.slots.size(); i++)
-            if (menu.getSlot(i).hasItem() && menu.getSlot(i).getItem().getItem() == plan.smeltItem) inputInInv += menu.getSlot(i).getItem().getCount();
+        int inputInInv = countSmeltInputInInventory(menu);
         if (inputInInv <= 0) { succeedStep(); return pause(); }
-        if (!menu.getSlot(inputSlot).hasItem() || menu.getSlot(inputSlot).getItem().getItem() == plan.smeltItem) {
+        if (!menu.getSlot(inputSlot).hasItem() || isSmeltInputSlot(menu.getSlot(inputSlot))) {
             for (int i = playerInvStart; i < menu.slots.size(); i++)
-                if (menu.getSlot(i).hasItem() && menu.getSlot(i).getItem().getItem() == plan.smeltItem) {
+                if (menu.getSlot(i).hasItem() && isSmeltInput(menu.getSlot(i).getItem().getItem())) {
                     ctx.playerController().windowClick(menu.containerId, i, 0, ClickType.QUICK_MOVE, ctx.player());
                     plan.smeltMonitorTick = 0;
+                    plan.smeltDidWorkAtCurrentFurnace = true;
                     succeedStep();
                     return pause();
                 }
@@ -697,28 +714,203 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         AbstractContainerMenu menu = ctx.player().containerMenu;
         if (menu instanceof InventoryMenu) { failStep(TaskOutcome.INTERACTION_FAILED); return cancelPath(); }
         if (menu.getSlot(2).hasItem()) { succeedStep(); return pause(); }
-        if (++plan.smeltMonitorTick >= SMELT_TIMEOUT_TICKS) { failStep(TaskOutcome.TIMEOUT); return cancelPath(); }
+        if (!hasSmeltInputInInventory(menu) && !isSmeltInputSlot(menu.getSlot(0))) {
+            succeedStep();
+            return pause();
+        }
+        plan.smeltMonitorTick++;
+        if (isMultiFurnaceSmelt() && plan.smeltMonitorTick >= SMELT_ROTATION_TICKS) {
+            succeedStep();
+            return pause();
+        }
+        if (plan.smeltMonitorTick >= SMELT_TIMEOUT_TICKS) { failStep(TaskOutcome.TIMEOUT); return cancelPath(); }
         return pause();
     }
 
     private PathingCommand tickCollectOutput() {
         AbstractContainerMenu menu = ctx.player().containerMenu;
         if (menu instanceof InventoryMenu) { failStep(TaskOutcome.INTERACTION_FAILED); return cancelPath(); }
-        if (!menu.getSlot(2).hasItem()) { succeedStep(); return pause(); }
-        int collected = menu.getSlot(2).getItem().getCount();
-        ctx.playerController().windowClick(menu.containerId, 2, 0, ClickType.QUICK_MOVE, ctx.player());
-        plan.smeltedSoFar += collected;
-        if (plan.smeltTargetCount > 0 && plan.smeltedSoFar >= plan.smeltTargetCount) { succeedStep(); return pause(); }
-        int playerInvStart = firstPlayerInventorySlot(menu);
-        int remaining = 0;
-        for (int i = playerInvStart; i < menu.slots.size(); i++)
-            if (menu.getSlot(i).hasItem() && menu.getSlot(i).getItem().getItem() == plan.smeltItem) remaining += menu.getSlot(i).getItem().getCount();
-        if (remaining > 0) {
-            plan.smeltLoadPhase = LOAD_PHASE_INPUT;
-            stepIdx -= 3; // back to LOAD_FURNACE
+        if (menu.getSlot(2).hasItem()) {
+            int collected = menu.getSlot(2).getItem().getCount();
+            ctx.playerController().windowClick(menu.containerId, 2, 0, ClickType.QUICK_MOVE, ctx.player());
+            plan.smeltedSoFar += collected;
+            plan.smeltDidWorkAtCurrentFurnace = true;
+            plan.smeltNoWorkVisits = 0;
+            if (plan.smeltTargetCount > 0 && plan.smeltedSoFar >= plan.smeltTargetCount) { succeedStep(); return pause(); }
+        }
+        if (isMultiFurnaceSmelt()) {
+            boolean hasInventoryInput = hasSmeltInputInInventory(menu);
+            boolean currentFurnaceActive = isSmeltInputSlot(menu.getSlot(0)) || menu.getSlot(2).hasItem();
+            boolean shouldKeepCycling = hasInventoryInput || currentFurnaceActive || plan.smeltDidWorkAtCurrentFurnace;
+
+            if (shouldKeepCycling) {
+                plan.smeltNoWorkVisits = 0;
+                plan.smeltDidWorkAtCurrentFurnace = false;
+                advanceSmeltFurnaceTarget();
+                plan.smeltLoadPhase = LOAD_PHASE_FUEL;
+                plan.smeltMonitorTick = 0;
+                ctx.player().closeContainer();
+                stepIdx = 0; // next tick resumes at PATH to reach the next furnace target
+            } else if (++plan.smeltNoWorkVisits < plan.smeltFurnaces.size()) {
+                advanceSmeltFurnaceTarget();
+                plan.smeltLoadPhase = LOAD_PHASE_FUEL;
+                plan.smeltMonitorTick = 0;
+                ctx.player().closeContainer();
+                stepIdx = 0;
+            }
+        } else if (hasSmeltInputInInventory(menu)) {
+            plan.smeltLoadPhase = LOAD_PHASE_FUEL;
+            plan.smeltMonitorTick = 0;
+            stepIdx = 3; // next tick resumes at LOAD_FURNACE while the same furnace menu stays open
         }
         succeedStep();
         return pause();
+    }
+
+    private boolean isSmeltInput(net.minecraft.world.item.Item item) {
+        return plan != null && plan.smeltItems != null && plan.smeltItems.contains(item);
+    }
+
+    private boolean isSmeltInputSlot(Slot slot) {
+        return slot != null && slot.hasItem() && isSmeltInput(slot.getItem().getItem());
+    }
+
+    private boolean hasUsableFuel(Slot slot) {
+        return slot != null && slot.hasItem() && isKnownFurnaceFuel(slot.getItem());
+    }
+
+    private int findFuelSlot(AbstractContainerMenu menu, int playerInvStart) {
+        for (int i = playerInvStart; i < menu.slots.size(); i++) {
+            Slot slot = menu.getSlot(i);
+            if (slot.hasItem() && isKnownFurnaceFuel(slot.getItem())) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private boolean isKnownFurnaceFuel(ItemStack stack) {
+        if (stack.isEmpty()) {
+            return false;
+        }
+        net.minecraft.world.item.Item item = stack.getItem();
+        return item == Items.COAL
+                || item == Items.CHARCOAL
+                || item == Items.COAL_BLOCK
+                || item == Items.BLAZE_ROD
+                || item == Items.DRIED_KELP_BLOCK
+                || item == Items.BAMBOO
+                || item == Items.STICK;
+    }
+
+    private boolean hasSmeltInputInInventory(AbstractContainerMenu menu) {
+        return countSmeltInputInInventory(menu) > 0;
+    }
+
+    private int countSmeltInputInInventory(AbstractContainerMenu menu) {
+        int inputInInv = 0;
+        int playerInvStart = firstPlayerInventorySlot(menu);
+        for (int i = playerInvStart; i < menu.slots.size(); i++) {
+            if (menu.getSlot(i).hasItem() && isSmeltInput(menu.getSlot(i).getItem().getItem())) {
+                inputInInv += menu.getSlot(i).getItem().getCount();
+            }
+        }
+        return inputInInv;
+    }
+
+    private boolean isMultiFurnaceSmelt() {
+        return plan != null && plan.smeltFurnaces != null && plan.smeltFurnaces.size() > 1;
+    }
+
+    private List<net.minecraft.world.item.Item> resolveSmeltInputs(net.minecraft.world.item.Item requestedItem) {
+        if (!(requestedItem instanceof BlockItem requestedBlockItem)) {
+            return List.of(requestedItem);
+        }
+
+        if (requestedBlockItem.getBlock().defaultBlockState().is(BlockTags.IRON_ORES)) {
+            return collectBlockTagItems(BlockTags.IRON_ORES, requestedItem);
+        }
+        if (requestedBlockItem.getBlock().defaultBlockState().is(BlockTags.COPPER_ORES)) {
+            return collectBlockTagItems(BlockTags.COPPER_ORES, requestedItem);
+        }
+        if (requestedBlockItem.getBlock().defaultBlockState().is(BlockTags.GOLD_ORES)) {
+            return collectBlockTagItems(BlockTags.GOLD_ORES, requestedItem);
+        }
+        if (requestedBlockItem.getBlock().defaultBlockState().is(BlockTags.COAL_ORES)) {
+            return collectBlockTagItems(BlockTags.COAL_ORES, requestedItem);
+        }
+        if (requestedBlockItem.getBlock().defaultBlockState().is(BlockTags.DIAMOND_ORES)) {
+            return collectBlockTagItems(BlockTags.DIAMOND_ORES, requestedItem);
+        }
+        if (requestedBlockItem.getBlock().defaultBlockState().is(BlockTags.EMERALD_ORES)) {
+            return collectBlockTagItems(BlockTags.EMERALD_ORES, requestedItem);
+        }
+        if (requestedBlockItem.getBlock().defaultBlockState().is(BlockTags.LAPIS_ORES)) {
+            return collectBlockTagItems(BlockTags.LAPIS_ORES, requestedItem);
+        }
+        if (requestedBlockItem.getBlock().defaultBlockState().is(BlockTags.REDSTONE_ORES)) {
+            return collectBlockTagItems(BlockTags.REDSTONE_ORES, requestedItem);
+        }
+
+        return List.of(requestedItem);
+    }
+
+    private List<net.minecraft.world.item.Item> collectBlockTagItems(net.minecraft.tags.TagKey<net.minecraft.world.level.block.Block> tag,
+                                                                     net.minecraft.world.item.Item fallbackItem) {
+        LinkedHashSet<net.minecraft.world.item.Item> items = new LinkedHashSet<>();
+        BuiltInRegistries.ITEM.stream()
+                .filter(BlockItem.class::isInstance)
+                .map(BlockItem.class::cast)
+                .filter(blockItem -> blockItem.getBlock().defaultBlockState().is(tag))
+                .map(net.minecraft.world.item.Item.class::cast)
+                .forEach(items::add);
+        if (items.isEmpty()) {
+            items.add(fallbackItem);
+        }
+        return List.copyOf(items);
+    }
+
+    private boolean advanceSmeltFurnaceTarget() {
+        if (plan == null || plan.smeltFurnaces == null || plan.smeltFurnaces.isEmpty()) {
+            return false;
+        }
+        plan.smeltFurnaceIndex = (plan.smeltFurnaceIndex + 1) % plan.smeltFurnaces.size();
+        plan.targetPos = plan.smeltFurnaces.get(plan.smeltFurnaceIndex);
+        return true;
+    }
+
+    private List<BlockPos> findConnectedFurnaces(BlockPos start, net.minecraft.world.level.block.Block block) {
+        if (start == null || block == null) {
+            return List.of();
+        }
+
+        Set<BlockPos> visited = new HashSet<>();
+        Deque<BlockPos> frontier = new ArrayDeque<>();
+        ArrayList<BlockPos> found = new ArrayList<>();
+        frontier.add(start);
+        visited.add(start);
+
+        while (!frontier.isEmpty()) {
+            BlockPos pos = frontier.removeFirst();
+            if (!ctx.world().getBlockState(pos).is(block)) {
+                continue;
+            }
+            found.add(pos);
+            for (Direction direction : Direction.values()) {
+                BlockPos next = pos.relative(direction);
+                if (visited.add(next) && ctx.world().getBlockState(next).is(block)) {
+                    frontier.addLast(next);
+                }
+            }
+        }
+
+        if (found.isEmpty()) {
+            return List.of(start);
+        }
+
+        BetterBlockPos pf = ctx.playerFeet();
+        found.sort((a, b) -> Double.compare(pf.distSqr(a), pf.distSqr(b)));
+        return List.copyOf(found);
     }
 
     // ─── Plan/step lifecycle helpers ─────────────────────────────────────────

@@ -72,6 +72,10 @@ public final class SleepInBedProcess extends BaritoneProcessHelper
     /** Maximum path-calc failures before declaring {@code UNREACHABLE}. */
     private static final int MAX_CALC_FAILURES = 3;
 
+    /** Vanilla requires the player to be within ~3 blocks of a bed to sleep.
+     *  Squared distance threshold (3^2) for proximity checks. */
+    private static final double SLEEP_PROXIMITY_SQ = 9.0;
+
     /**
      * Day-time tick value at which players are allowed to sleep in the
      * overworld (equivalent to dusk).
@@ -233,6 +237,11 @@ public final class SleepInBedProcess extends BaritoneProcessHelper
             }
         }
 
+        // Vanilla requires ~3 blocks proximity to sleep – verify before attempting
+        if (ctx.playerFeet().distSqr(targetBed) > SLEEP_PROXIMITY_SQ) {
+            return new PathingCommand(buildGoal(), PathingCommandType.REVALIDATE_GOAL_AND_PATH);
+        }
+
         // Check if we are now in interaction range
         Optional<Rotation> reachable = RotationUtils.reachable(ctx, targetBed,
                 getInteractionReachDistance());
@@ -278,6 +287,14 @@ public final class SleepInBedProcess extends BaritoneProcessHelper
             logDirect("SleepInBed: no longer night while interacting");
             finish(TaskOutcome.NOT_NIGHT);
             return new PathingCommand(null, PathingCommandType.CANCEL_AND_SET_GOAL);
+        }
+
+        // Vanilla requires ~3 blocks proximity to sleep
+        if (ctx.playerFeet().distSqr(targetBed) > SLEEP_PROXIMITY_SQ) {
+            // Too far – fall back to pathing
+            phase = Phase.PATHING;
+            calcFailCount = 0;
+            return new PathingCommand(buildGoal(), PathingCommandType.REVALIDATE_GOAL_AND_PATH);
         }
 
         Optional<Rotation> reachable = RotationUtils.reachable(ctx, targetBed,
