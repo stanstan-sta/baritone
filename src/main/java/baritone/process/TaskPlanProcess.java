@@ -59,7 +59,6 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -341,8 +340,8 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
     private List<net.minecraft.world.item.Item> findSmeltableItemsInInventory() {
         java.util.LinkedHashSet<net.minecraft.world.item.Item> found = new java.util.LinkedHashSet<>();
         var player = baritone.getPlayerContext().player();
-        for (int i = 0; i < player.getInventory().items.size(); i++) {
-            net.minecraft.world.item.ItemStack stack = player.getInventory().items.get(i);
+        for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
+            net.minecraft.world.item.ItemStack stack = player.getInventory().getItem(i);
             if (stack.isEmpty()) continue;
             net.minecraft.world.item.Item item = stack.getItem();
             if (isSmeltableItem(item)) {
@@ -745,15 +744,16 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
     private PathingCommand tickFindFurnace() {
         if (plan.smeltFurnaceName == null || plan.smeltFurnaceName.isEmpty()) plan.smeltFurnaceName = "furnace";
         net.minecraft.world.level.block.Block fb = blockFromName(plan.smeltFurnaceName);
-        BlockPos target = findNearestBlock(plan.smeltFurnaceName, fb, plan.smeltMaxSearchRadius);
-        if (target == null) { failStep(TaskOutcome.NOT_FOUND); return cancelPath(); }
-        plan.smeltFurnaces = findConnectedFurnaces(target, fb);
-        if (plan.smeltFurnaces.isEmpty()) {
-            plan.smeltFurnaces = List.of(target);
+        if (fb == null) { failStep(TaskOutcome.NOT_FOUND); return cancelPath(); }
+        if (plan.smeltFurnaces == null || plan.smeltFurnaces.isEmpty()) {
+            plan.smeltFurnaces = findNearbyFurnaces(plan.smeltFurnaceName, fb, plan.smeltMaxSearchRadius);
+            if (plan.smeltFurnaces.isEmpty()) { failStep(TaskOutcome.NOT_FOUND); return cancelPath(); }
+            plan.smeltFurnaceIndex = 0;
+            plan.smeltNoWorkVisits = 0;
+        } else if (plan.smeltFurnaceIndex < 0 || plan.smeltFurnaceIndex >= plan.smeltFurnaces.size()) {
+            plan.smeltFurnaceIndex = 0;
         }
-        plan.smeltFurnaceIndex = 0;
-        plan.targetPos = plan.smeltFurnaces.get(0);
-        plan.smeltNoWorkVisits = 0;
+        plan.targetPos = plan.smeltFurnaces.get(plan.smeltFurnaceIndex);
         plan.smeltDidWorkAtCurrentFurnace = false;
         succeedStep();
         return pause();
@@ -969,38 +969,47 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         return true;
     }
 
-    private List<BlockPos> findConnectedFurnaces(BlockPos start, net.minecraft.world.level.block.Block block) {
-        if (start == null || block == null) {
+    private List<BlockPos> findNearbyFurnaces(String blockName, net.minecraft.world.level.block.Block block, int maxSearchRadius) {
+        if (blockName == null || blockName.isEmpty() || block == null) {
             return List.of();
         }
 
-        Set<BlockPos> visited = new HashSet<>();
-        Deque<BlockPos> frontier = new ArrayDeque<>();
+        var world = baritone.getWorldProvider().getCurrentWorld();
+        var cachedWorld = world.getCachedWorld();
+        BetterBlockPos pf = ctx.playerFeet();
         ArrayList<BlockPos> found = new ArrayList<>();
-        frontier.add(start);
-        visited.add(start);
 
-        while (!frontier.isEmpty()) {
-            BlockPos pos = frontier.removeFirst();
-            if (!ctx.world().getBlockState(pos).is(block)) {
-                continue;
-            }
-            found.add(pos);
-            for (Direction direction : Direction.values()) {
-                BlockPos next = pos.relative(direction);
-                if (visited.add(next) && ctx.world().getBlockState(next).is(block)) {
-                    frontier.addLast(next);
-                }
+        if (cachedWorld != null) {
+            found.addAll(cachedWorld.getLocationsOf(blockName, Integer.MAX_VALUE, pf.x, pf.z, maxSearchRadius));
+            if (found.isEmpty()) {
+                BaritoneAPI.getProvider().getWorldScanner().repack(ctx);
+                found.addAll(cachedWorld.getLocationsOf(blockName, Integer.MAX_VALUE, pf.x, pf.z, maxSearchRadius));
             }
         }
 
         if (found.isEmpty()) {
-            return List.of(start);
+            java.util.List<net.minecraft.world.level.block.Block> target = java.util.Collections.singletonList(block);
+            java.util.List<BlockPos> scanned = BaritoneAPI.getProvider().getWorldScanner()
+                    .scanChunkRadius(ctx, target, Math.max(0, maxSearchRadius * 16), 0, 256);
+            if (scanned != null) {
+                found.addAll(scanned);
+            }
         }
 
-        BetterBlockPos pf = ctx.playerFeet();
-        found.sort((a, b) -> Double.compare(pf.distSqr(a), pf.distSqr(b)));
-        return List.copyOf(found);
+        if (found.isEmpty()) {
+            return List.of();
+        }
+
+        Set<BlockPos> unique = new LinkedHashSet<>();
+        for (BlockPos pos : found) {
+            if (ctx.world().getBlockState(pos).is(block)) {
+                unique.add(pos);
+            }
+        }
+
+        ArrayList<BlockPos> sorted = new ArrayList<>(unique);
+        sorted.sort((a, b) -> Double.compare(pf.distSqr(a), pf.distSqr(b)));
+        return List.copyOf(sorted);
     }
 
     // --- Plan/step lifecycle helpers -----------------------------------------
