@@ -42,6 +42,10 @@ public class MineCommand extends Command {
         args.requireMin(1);
         List<BlockOptionalMeta> boms = new ArrayList<>();
         while (args.hasAny()) {
+            if (quantity == 0 && args.hasExactlyOne() && args.is(Integer.class)) {
+                quantity = args.getAs(Integer.class);
+                break;
+            }
             boms.add(args.getDatatypeFor(ForBlockOptionalMeta.INSTANCE));
         }
         BaritoneAPI.getProvider().getWorldScanner().repack(ctx);
@@ -69,11 +73,14 @@ public class MineCommand extends Command {
                 "The mine command allows you to tell Baritone to search for and mine individual blocks.",
                 "",
                 "The specified blocks can be ores, or any other block.",
+                "You can specify a quantity to mine, either before or after the blocks.",
                 "",
                 "Also see the legitMine settings (see #set l legitMine).",
                 "",
                 "Usage:",
-                "> mine diamond_ore - Mines all diamonds it can find."
+                "> mine diamond_ore - Mines all diamonds it can find.",
+                "> mine 64 iron_ore - Mines 64 iron ores.",
+                "> mine gold_ore 10 - Mines 10 gold ores."
         );
     }
 }

@@ -41,12 +41,12 @@ public class FarmCommand extends Command {
         args.requireMax(2);
         int range = 0;
         BetterBlockPos origin = null;
-        //range
-        if (args.has(1)) {
+
+        if (args.hasAny() && args.is(Integer.class)) {
             range = args.getAs(Integer.class);
         }
-        //waypoint
-        if (args.has(1)) {
+
+        if (args.hasAny()) {
             IWaypoint[] waypoints = args.getDatatypeFor(ForWaypoints.INSTANCE);
             IWaypoint waypoint = null;
             switch (waypoints.length) {
@@ -59,6 +59,10 @@ public class FarmCommand extends Command {
                     throw new CommandInvalidStateException("Multiple waypoints were found");
             }
             origin = waypoint.getLocation();
+        }
+        
+        if (range == 0 && args.hasExactlyOne() && args.is(Integer.class)) {
+            range = args.getAs(Integer.class);
         }
 
         baritone.getFarmProcess().farm(range, origin);
@@ -83,7 +87,8 @@ public class FarmCommand extends Command {
                 "Usage:",
                 "> farm - farms every crop it can find.",
                 "> farm <range> - farm crops within range from the starting position.",
-                "> farm <range> <waypoint> - farm crops within range from waypoint."
+                "> farm <range> <waypoint> - farm crops within range from waypoint.",
+                "> farm <waypoint> <range> - same as above, the order does not matter."
         );
     }
 }
