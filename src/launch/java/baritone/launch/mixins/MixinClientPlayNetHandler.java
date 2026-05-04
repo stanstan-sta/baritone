@@ -21,11 +21,11 @@ import baritone.Baritone;
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.event.events.BlockChangeEvent;
-import baritone.api.event.events.ChatEvent;
 import baritone.api.event.events.ChunkEvent;
 import baritone.api.event.events.type.EventState;
 import baritone.api.utils.Pair;
 import baritone.cache.CachedChunk;
+import baritone.utils.ChatControlHelper;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientCommonPacketListenerImpl;
 import net.minecraft.client.multiplayer.ClientPacketListener;
@@ -85,13 +85,23 @@ public abstract class MixinClientPlayNetHandler extends ClientCommonPacketListen
             cancellable = true
     )
     private void sendChatMessage(String string, CallbackInfo ci) {
-        ChatEvent event = new ChatEvent(string);
-        IBaritone baritone = BaritoneAPI.getProvider().getBaritoneForPlayer(this.minecraft.player);
-        if (baritone == null) {
+        if (ChatControlHelper.dispatchChatControl(this.minecraft, string)) {
+            ci.cancel();
+        }
+    }
+
+    @Inject(
+            method = "sendCommand(Ljava/lang/String;)V",
+            at = @At("HEAD"),
+            cancellable = true
+    )
+    private void sendCommand(String string, CallbackInfo ci) {
+        String prefixedCommand = ChatControlHelper.isPrefixedBaritoneCommand(string) ? string : "/" + string;
+        if (!ChatControlHelper.isPrefixedBaritoneCommand(prefixedCommand)) {
             return;
         }
-        baritone.getGameEventHandler().onSendChatMessage(event);
-        if (event.isCancelled()) {
+
+        if (ChatControlHelper.dispatchChatControl(this.minecraft, prefixedCommand)) {
             ci.cancel();
         }
     }
