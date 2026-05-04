@@ -24,6 +24,7 @@ import baritone.api.command.argument.IArgConsumer;
 import baritone.api.command.datatypes.ForBlockOptionalMeta;
 import baritone.api.command.exception.CommandException;
 import baritone.api.utils.BlockOptionalMeta;
+import baritone.api.utils.BlockUtils;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -46,7 +47,33 @@ public class MineCommand extends Command {
                 quantity = args.getAs(Integer.class);
                 break;
             }
-            boms.add(args.getDatatypeFor(ForBlockOptionalMeta.INSTANCE));
+
+            // Check for category shortcuts first (e.g. "wood", "logs", "ores", "coral")
+            String rawArg = args.peekString();
+            List<String> categoryExpansion = BlockUtils.getCategoryExpansion(rawArg);
+            if (categoryExpansion != null) {
+                args.get(); // consume the category argument
+                for (String blockName : categoryExpansion) {
+                    try {
+                        boms.add(new BlockOptionalMeta(blockName));
+                    } catch (Exception ignored) {
+                        // Silently skip blocks that don't exist in this version
+                    }
+                }
+                continue;
+            }
+
+            BlockOptionalMeta bom = args.getDatatypeFor(ForBlockOptionalMeta.INSTANCE);
+            boms.add(bom);
+            // Expand variants: if user wants "acacia_wood", also include "acacia_log", "stripped_acacia_wood", etc.
+            String blockName = BlockUtils.blockToString(bom.getBlock());
+            for (String variant : BlockUtils.getVariants(blockName)) {
+                try {
+                    boms.add(new BlockOptionalMeta(variant));
+                } catch (Exception ignored) {
+                    // Silently skip variants that don't exist in this version
+                }
+            }
         }
         BaritoneAPI.getProvider().getWorldScanner().repack(ctx);
         logDirect(String.format("Mining %s", boms.toString()));
@@ -75,12 +102,21 @@ public class MineCommand extends Command {
                 "The specified blocks can be ores, or any other block.",
                 "You can specify a quantity to mine, either before or after the blocks.",
                 "",
+                "Category shortcuts:",
+                "> wood - All wood/log types from all tree species (oak, spruce, birch, jungle, acacia, etc.)",
+                "> logs - All log/stem types from all tree species",
+                "> ores - All overworld and nether ores",
+                "> coral, coral_blocks - All coral types",
+                "",
+                "Block variants are automatically included (e.g., mining acacia_wood also mines acacia_log).",
+                "",
                 "Also see the legitMine settings (see #set l legitMine).",
                 "",
                 "Usage:",
                 "> mine diamond_ore - Mines all diamonds it can find.",
                 "> mine 64 iron_ore - Mines 64 iron ores.",
-                "> mine gold_ore 10 - Mines 10 gold ores."
+                "> mine wood - Mines all wood/log blocks indiscriminately.",
+                "> mine ores - Mines all ore types."
         );
     }
 }
