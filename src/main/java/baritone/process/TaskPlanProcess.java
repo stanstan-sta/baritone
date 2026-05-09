@@ -784,16 +784,31 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         }
         int inputInInv = countSmeltInputInInventory(menu);
         if (inputInInv <= 0) { succeedStep(); return pause(); }
-        if (!menu.getSlot(inputSlot).hasItem() || isSmeltInputSlot(menu.getSlot(inputSlot))) {
-            for (int i = playerInvStart; i < menu.slots.size(); i++)
+
+        // Clear obstructed input slot (non-smelt item blocking deposit)
+        Slot slot0 = menu.getSlot(inputSlot);
+        if (slot0.hasItem() && !isSmeltInput(slot0.getItem().getItem())) {
+            ctx.playerController().windowClick(menu.containerId, inputSlot, 0, ClickType.QUICK_MOVE, ctx.player());
+            plan.smeltDidWorkAtCurrentFurnace = true;
+            return pause();
+        }
+
+        if (!slot0.hasItem() || isSmeltInputSlot(slot0)) {
+            for (int i = playerInvStart; i < menu.slots.size(); i++) {
                 if (menu.getSlot(i).hasItem() && isSmeltInput(menu.getSlot(i).getItem().getItem())) {
                     ctx.playerController().windowClick(menu.containerId, i, 0, ClickType.QUICK_MOVE, ctx.player());
                     plan.smeltMonitorTick = 0;
                     plan.smeltDidWorkAtCurrentFurnace = true;
-                    succeedStep();
+                    // Verify deposit actually landed in input slot
+                    if (menu.getSlot(inputSlot).hasItem() && isSmeltInput(menu.getSlot(inputSlot).getItem().getItem())) {
+                        succeedStep();
+                    }
+                    // If verification fails we stay in this step and retry next tick
                     return pause();
                 }
+            }
         }
+
         plan.smeltLoadPhase = LOAD_PHASE_FUEL;
         plan.smeltMonitorTick = 0;
         succeedStep();
@@ -810,7 +825,14 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         }
         plan.smeltMonitorTick++;
         if (isMultiFurnaceSmelt() && plan.smeltMonitorTick >= SMELT_ROTATION_TICKS) {
-            succeedStep();
+            boolean hasInput = isSmeltInputSlot(menu.getSlot(0));
+            boolean hasFuel = hasUsableFuel(menu.getSlot(1));
+            if (hasInput && hasFuel) {
+                succeedStep();
+                return pause();
+            }
+            // Furnace isn't actively smelting — don't rotate away blindly
+            plan.smeltMonitorTick = 0;
             return pause();
         }
         if (plan.smeltMonitorTick >= SMELT_TIMEOUT_TICKS) { failStep(TaskOutcome.TIMEOUT); return cancelPath(); }
@@ -831,9 +853,18 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         if (isMultiFurnaceSmelt()) {
             boolean hasInventoryInput = hasSmeltInputInInventory(menu);
             boolean currentFurnaceActive = isSmeltInputSlot(menu.getSlot(0)) || menu.getSlot(2).hasItem();
+            boolean currentFurnaceCanTakeMore = canFurnaceTakeMoreInput(menu, 0);
+            boolean shouldStayHere = hasInventoryInput && currentFurnaceCanTakeMore;
             boolean shouldKeepCycling = hasInventoryInput || currentFurnaceActive || plan.smeltDidWorkAtCurrentFurnace;
 
-            if (shouldKeepCycling) {
+            if (shouldStayHere) {
+                // Current furnace has room and we have more input — stay and reload
+                plan.smeltNoWorkVisits = 0;
+                plan.smeltDidWorkAtCurrentFurnace = false;
+                plan.smeltLoadPhase = LOAD_PHASE_FUEL;
+                plan.smeltMonitorTick = 0;
+                stepIdx = 3; // back to await menu (already open)
+            } else if (shouldKeepCycling) {
                 plan.smeltNoWorkVisits = 0;
                 plan.smeltDidWorkAtCurrentFurnace = false;
                 advanceSmeltFurnaceTarget();
@@ -869,6 +900,13 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         return slot != null && slot.hasItem() && isKnownFurnaceFuel(slot.getItem());
     }
 
+    private boolean canFurnaceTakeMoreInput(AbstractContainerMenu menu, int inputSlot) {
+        Slot slot = menu.getSlot(inputSlot);
+        if (!slot.hasItem()) return true;
+        if (!isSmeltInput(slot.getItem().getItem())) return false;
+        return slot.getItem().getCount() < slot.getMaxStackSize();
+    }
+
     private int findFuelSlot(AbstractContainerMenu menu, int playerInvStart) {
         for (int i = playerInvStart; i < menu.slots.size(); i++) {
             Slot slot = menu.getSlot(i);
@@ -884,13 +922,26 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
             return false;
         }
         net.minecraft.world.item.Item item = stack.getItem();
-        return item == Items.COAL
+        if (item == Items.COAL
                 || item == Items.CHARCOAL
                 || item == Items.COAL_BLOCK
                 || item == Items.BLAZE_ROD
                 || item == Items.DRIED_KELP_BLOCK
                 || item == Items.BAMBOO
-                || item == Items.STICK;
+                || item == Items.STICK
+                || item == Items.LAVA_BUCKET) {
+            return true;
+        }
+        // Wooden tools and items
+        if (item == Items.WOODEN_PICKAXE || item == Items.WOODEN_AXE
+                || item == Items.WOODEN_SHOVEL || item == Items.WOODEN_HOE
+                || item == Items.WOODEN_SWORD || item == Items.BOWL
+                || item == Items.FISHING_ROD || item == Items.CROSSBOW) {
+            return true;
+        }
+        // Logs and planks
+        String id = BuiltInRegistries.ITEM.getKey(item).toString();
+        return id.endsWith("_log") || id.endsWith("_wood") || id.endsWith("_planks");
     }
 
     private boolean hasSmeltInputInInventory(AbstractContainerMenu menu) {
