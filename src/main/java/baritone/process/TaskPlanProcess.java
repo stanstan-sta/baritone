@@ -746,8 +746,9 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         net.minecraft.world.level.block.Block fb = blockFromName(plan.smeltFurnaceName);
         if (fb == null) { failStep(TaskOutcome.NOT_FOUND); return cancelPath(); }
         if (plan.smeltFurnaces == null || plan.smeltFurnaces.isEmpty()) {
-            plan.smeltFurnaces = findNearbyFurnaces(plan.smeltFurnaceName, fb, plan.smeltMaxSearchRadius);
-            if (plan.smeltFurnaces.isEmpty()) { failStep(TaskOutcome.NOT_FOUND); return cancelPath(); }
+            List<BlockPos> found = findNearbyFurnaces(plan.smeltFurnaceName, fb, plan.smeltMaxSearchRadius);
+            if (found.isEmpty()) { failStep(TaskOutcome.NOT_FOUND); return cancelPath(); }
+            plan.smeltFurnaces = List.of(found.get(0));
             plan.smeltFurnaceIndex = 0;
             plan.smeltNoWorkVisits = 0;
         } else if (plan.smeltFurnaceIndex < 0 || plan.smeltFurnaceIndex >= plan.smeltFurnaces.size()) {
@@ -879,7 +880,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
                 ctx.player().closeContainer();
                 stepIdx = 0;
             }
-        } else if (hasSmeltInputInInventory(menu)) {
+        } else if (hasSmeltInputInInventory(menu) || isSmeltInputSlot(menu.getSlot(0))) {
             plan.smeltLoadPhase = LOAD_PHASE_FUEL;
             plan.smeltMonitorTick = 0;
             stepIdx = 3;
@@ -969,13 +970,19 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         }
 
         if (requestedBlockItem.getBlock().defaultBlockState().is(BlockTags.IRON_ORES)) {
-            return collectBlockTagItems(BlockTags.IRON_ORES, requestedItem);
+            ArrayList<net.minecraft.world.item.Item> items = new ArrayList<>(collectBlockTagItems(BlockTags.IRON_ORES, requestedItem));
+            if (Items.RAW_IRON != null) items.add(Items.RAW_IRON);
+            return items;
         }
         if (requestedBlockItem.getBlock().defaultBlockState().is(BlockTags.COPPER_ORES)) {
-            return collectBlockTagItems(BlockTags.COPPER_ORES, requestedItem);
+            ArrayList<net.minecraft.world.item.Item> items = new ArrayList<>(collectBlockTagItems(BlockTags.COPPER_ORES, requestedItem));
+            if (Items.RAW_COPPER != null) items.add(Items.RAW_COPPER);
+            return items;
         }
         if (requestedBlockItem.getBlock().defaultBlockState().is(BlockTags.GOLD_ORES)) {
-            return collectBlockTagItems(BlockTags.GOLD_ORES, requestedItem);
+            ArrayList<net.minecraft.world.item.Item> items = new ArrayList<>(collectBlockTagItems(BlockTags.GOLD_ORES, requestedItem));
+            if (Items.RAW_GOLD != null) items.add(Items.RAW_GOLD);
+            return items;
         }
         if (requestedBlockItem.getBlock().defaultBlockState().is(BlockTags.COAL_ORES)) {
             return collectBlockTagItems(BlockTags.COAL_ORES, requestedItem);
