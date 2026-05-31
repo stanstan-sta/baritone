@@ -5,9 +5,11 @@ This will be used to advance my forked version of mindcraft, but bring higher in
 
 Examples:
 #mine 64 wood -> applies to every possible type of wood
+
 #mine 5 iron_ore -> applies to every possible type of iron ore like deepslate or any other types
 
 Custom:
 #sleep -> finds nearest bed and goes to sleep
+
 #craft -> finds nearest crafting table and interacts with it
 
