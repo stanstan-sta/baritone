@@ -1104,13 +1104,13 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         String label = plan.label();
         plan.markSucceeded();
         clearState();
-        logDirect("[Baritone] Task complete: " + label);
+        logDirect("Task complete: " + label);
         if (!planQueue.isEmpty()) {
             this.plan = planQueue.pollFirst();
             this.stepIdx = 0;
             advanceToStep(0);
         } else {
-            logDirect("[Baritone] All queued tasks complete");
+            logDirect("All queued tasks complete");
         }
     }
     private void abortPlan(TaskOutcome r) {
@@ -1122,7 +1122,7 @@ public final class TaskPlanProcess extends BaritoneProcessHelper
         }
         for (int i = stepIdx + 1; i < plan.mutableSteps().size(); i++) plan.mutableSteps().get(i).cancel();
         plan.markFailed(r);
-        logDirect("[Baritone] Task failed: " + label + " - " + r);
+        logDirect("Task failed: " + label + " - " + r.toWireString());
         clearState();
         planQueue.clear();
     }

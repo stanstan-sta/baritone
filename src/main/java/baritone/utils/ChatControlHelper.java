@@ -59,6 +59,9 @@ public final class ChatControlHelper {
             baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
         }
 
+        if (baritone == null) {
+            return false;
+        }
         ChatEvent event = new ChatEvent(message);
         baritone.getGameEventHandler().onSendChatMessage(event);
         return event.isCancelled();

@@ -1,7 +1,6 @@
 # Installation
 
-The easiest way to install Baritone is to install it as Forge/Neoforge/Fabric mod, but if you know how you can also use with a custom `version.json`
-(Examples: [1.14.4](https://www.dropbox.com/s/rkml3hjokd3qv0m/1.14.4-Baritone.zip?dl=1), [1.15.2](https://www.dropbox.com/s/8rx6f0kts9hvd4f/1.15.2-Baritone.zip?dl=1), [1.16.5](https://www.dropbox.com/s/i6f292o2i7o9acp/1.16.5-Baritone.zip?dl=1)).
+The easiest way to install Baritone is to install it as a Forge/Neoforge/Fabric mod. This fork is built for Minecraft 1.21.11 with Fabric.
 
 Once Baritone is installed, look [here](USAGE.md) for instructions on how to use it.
 
@@ -10,14 +9,11 @@ Releases are made rarely and are not always up to date with the latest features 
 
 Link to the releases page: [Releases](https://github.com/cabaletta/baritone/releases)
 
-The mapping between major Minecraft versions and major Baritone versions is as follows
-| Minecraft version | 1.12 | 1.13 | 1.14 | 1.15 | 1.16 | 1.17 | 1.18 | 1.19 | 1.20  | 1.21  |
-|-------------------|------|------|------|------|------|------|------|------|-------|-------|
-| Baritone version  | v1.2 | v1.3 | v1.4 | v1.5 | v1.6 | v1.7 | v1.8 | v1.9 | v1.10 | v1.11 |
+This fork is built for **Minecraft 1.21.11** with Fabric. Older versions for Minecraft 1.12–1.20 are available in the [releases](https://github.com/cabaletta/baritone/releases) page.
 
 Any official release will be GPG signed by leijurv (44A3EA646EADAC6A). Please verify that the hash of the file you download is in `checksums.txt` and that `checksums_signed.asc` is a valid signature by that public keys of `checksums.txt`. 
 
-The build is fully deterministic and reproducible, and you can verify that by running `docker build --no-cache -t cabaletta/baritone .` yourself and comparing the shasum. This works identically on Travis, Mac, and Linux (if you have docker on Windows, I'd be grateful if you could let me know if it works there too).
+The build is fully deterministic and reproducible, and you can verify that by running `docker build --no-cache -t cabaletta/baritone .` yourself and comparing the shasum. This works identically on GitHub Actions, Mac, and Linux (if you have docker on Windows, I'd be grateful if you could let me know if it works there too).
 
 
 ## Artifacts
@@ -56,7 +52,7 @@ The recommended Java versions by Minecraft version are
 | 1.12.2 - 1.16.5               | 8             |
 | 1.17.1                        | 16            |
 | 1.18.2 - 1.20.4               | 17            |
-| 1.20.5 - 1.21.5               | 21            |
+| 1.20.5 - 1.21.11              | 21            |
 
 Download java: https://adoptium.net/
 
@@ -68,16 +64,12 @@ These tasks depend on the minecraft version, but are (for the most part) standar
 
 For more details, see [the build ci action](/.github/workflows/gradle_build.yml) of the branch you want to build.
 
-For most branches `gradlew build` should build everything, but there are exceptions and this file might be out of date.
-
-More specifically, on older branches the setup used to be that `gradlew build` builds the tweaker jar
-and `gradlew build -Pbaritone.forge_build` / `gradlew build -Pbaritone.fabric_build` are needed to build
-for Forge/Fabric instead. And you might have to run `setupDecompWorkspace` first.
+For this fork, `gradlew build` builds the Fabric mod. The project uses Unimined for multi-loader setup.
 
 ## IntelliJ
 - Open the project in IntelliJ as a Gradle project
 - Refresh the Gradle project (or, to be safe, just restart IntelliJ)
-- Depending on the minecraft version, you may need to run `setupDecompWorkspace` or `genIntellijRuns` in order to get everything working
+- The project should work out of the box with the Unimined plugin
 
 ## Github Actions
 Most branches have a CI workflow at `.github/workflows/gradle_build.yml`. If you fork this repository and enable actions for your fork
