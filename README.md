@@ -5,4 +5,7 @@ This will be used to advance mindcraft, but bring higher intelligence for comput
 
 ## OpenRouter compatibility
 
-LLM integrations can use the OpenRouter API for model access. See the Mindcraft documentation for details on configuring OpenRouter models.
+LLM integrations can use the OpenRouter-compatible bridge helper in
+[`OPENROUTER.md`](OPENROUTER.md). The bridge uses OpenRouter's OpenAI-compatible
+Chat Completions API with tool calling and emits Baritone `#task` commands for
+an external launcher to send into Minecraft chat.
